@@ -22,7 +22,10 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from typing import Dict, Any
 
-from core.platform import platform
+# Add project root to sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.orchestrator import platform
 from core.analytics import analytics_engine
 from core.data_governance import consent_audit_ledger, erasure_audit_ledger, execute_right_to_erasure
 

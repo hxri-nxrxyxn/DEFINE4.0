@@ -32,7 +32,7 @@ from core.data_governance import (
 )
 from core.intent_engine import process_dtmf_intent, process_speech_intent
 from core.amd_engine import evaluate_amd_status, determine_voicemail_action
-from core.platform import platform
+from core.orchestrator import platform
 from core.analytics import analytics_engine
 
 # ANSI colors
