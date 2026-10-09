@@ -15,24 +15,64 @@ import random
 import requests
 from typing import Dict, Any, List, Optional
 
-EXOTEL_ACCOUNT_SID = os.environ.get("EXOTEL_ACCOUNT_SID", "mock_exotel_acc_sid")
-EXOTEL_API_KEY = os.environ.get("EXOTEL_API_KEY", "mock_exotel_api_key")
-EXOTEL_API_TOKEN = os.environ.get("EXOTEL_API_TOKEN", "mock_exotel_token")
-EXOTEL_CALLER_ID = os.environ.get("EXOTEL_CALLER_ID", "08047192800")
-EXOTEL_SUBDOMAIN = os.environ.get("EXOTEL_SUBDOMAIN", "api.in.exotel.com")
+def _load_exotel_config():
+    sid = os.environ.get("EXOTEL_ACCOUNT_SID", "")
+    key = os.environ.get("EXOTEL_API_KEY", "")
+    token = os.environ.get("EXOTEL_API_TOKEN", "")
+    caller_id = os.environ.get("EXOTEL_CALLER_ID", "")
+    subdomain = os.environ.get("EXOTEL_SUBDOMAIN", "api.in.exotel.com")
+    mode = os.environ.get("TELEPHONY_MODE", "")
 
-# Mode: SIMULATED or LIVE
-TELEPHONY_MODE = os.environ.get("TELEPHONY_MODE", "SIMULATED")
+    # Look for exotel_cred.txt or .env in root
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cred_path = os.path.join(root_dir, "exotel_cred.txt")
+    if os.path.exists(cred_path):
+        try:
+            with open(cred_path, "r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+                for line in lines:
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        if k == "EXOTEL_ACCOUNT_SID" and not sid: sid = v
+                        elif k == "EXOTEL_API_KEY" and not key: key = v
+                        elif k == "EXOTEL_API_TOKEN" and not token: token = v
+                        elif k == "EXOTEL_CALLER_ID" and not caller_id: caller_id = v
+        except Exception:
+            pass
+
+    if not caller_id:
+        caller_id = "08048332543"
+
+    if not mode:
+        mode = "LIVE" if (sid and key and token and "mock" not in sid) else "SIMULATED"
+
+    return {
+        "sid": sid or "mock_exotel_acc_sid",
+        "key": key or "mock_exotel_api_key",
+        "token": token or "mock_exotel_token",
+        "caller_id": caller_id,
+        "subdomain": subdomain,
+        "mode": mode
+    }
+
+cfg = _load_exotel_config()
+EXOTEL_ACCOUNT_SID = cfg["sid"]
+EXOTEL_API_KEY = cfg["key"]
+EXOTEL_API_TOKEN = cfg["token"]
+EXOTEL_CALLER_ID = cfg["caller_id"]
+EXOTEL_SUBDOMAIN = cfg["subdomain"]
+TELEPHONY_MODE = cfg["mode"]
 
 
 class ExotelClient:
-    def __init__(self, mode: str = TELEPHONY_MODE):
-        self.mode = mode
-        self.account_sid = EXOTEL_ACCOUNT_SID
-        self.api_key = EXOTEL_API_KEY
-        self.api_token = EXOTEL_API_TOKEN
-        self.caller_id = EXOTEL_CALLER_ID
-        self.base_url = f"https://{self.api_key}:{self.api_token}@{EXOTEL_SUBDOMAIN}"
+    def __init__(self, mode: str = None):
+        cfg = _load_exotel_config()
+        self.mode = mode or cfg["mode"]
+        self.account_sid = cfg["sid"]
+        self.api_key = cfg["key"]
+        self.api_token = cfg["token"]
+        self.caller_id = cfg["caller_id"]
+        self.base_url = f"https://{self.api_key}:{self.api_token}@{cfg['subdomain']}"
 
     def trigger_batch_campaign(
         self,

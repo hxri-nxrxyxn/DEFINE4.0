@@ -391,10 +391,10 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             name = payload.get("name", "Daison")
             template = payload.get("template", "Sample Campaign Script")
             
-            call_res = platform.telephony.initiate_voice_call(
-                phone_number=phone,
-                caller_id="+918045678900",
-                custom_text=template
+            call_res = platform.telephony.trigger_single_call(
+                recipient_phone=phone,
+                callback_url="http://localhost:8000/api/calls/webhook/status",
+                custom_field=template
             )
             self._send_json({
                 "status": "success",
