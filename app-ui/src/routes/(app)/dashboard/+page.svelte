@@ -135,7 +135,7 @@
 			</Card.Root>
 		{/each}
 		<Card.Root class="gap-2">
-			<Card.Content class="flex flex-col items-center gap-1 px-4 py-3">
+			<Card.Content class="flex flex-col items-center justify-center gap-1 px-4 py-4">
 				<div
 					class="grid size-12 place-items-center rounded-full"
 					style="background: conic-gradient(var(--foreground) {connectRatePct}%, var(--muted) 0)"
