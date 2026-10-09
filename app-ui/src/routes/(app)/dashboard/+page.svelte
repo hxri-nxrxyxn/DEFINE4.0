@@ -221,10 +221,10 @@
 			// Condition C: call was dialing and has ended after waiting at least 6 seconds without answering
 			const isConcluded =
 				status.call_state === 'COMPLETED' ||
-				(callRegisteredActive && !status.active && status.call_state !== 'CONNECTED') ||
+				(callRegisteredActive && !status.active) ||
 				(campaign.currentCallStatus === 'dialing' && !status.active && timeSinceDial > 6.0);
 
-			if (isConcluded && campaign.currentCallStatus !== 'idle') {
+			if (isConcluded) {
 				isExecutingStep = true;
 				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
