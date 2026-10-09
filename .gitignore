@@ -1,0 +1,18 @@
+# Credentials & Secrets
+**/cred.txt
+**/.env
+*.key
+*.pem
+
+# Python Virtual Environments & Bytecode
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary audio test recordings
+**/*.raw
+
+# Malayalam Tools (tracked separately in its own repository with large model binaries)
+malayalam-stuff/

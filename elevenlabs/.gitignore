@@ -1,0 +1,17 @@
+# ElevenLabs Secrets & Credentials
+cred.txt
+.env
+*.key
+
+# Python Virtual Environments & Caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary audio test recordings
+*.raw
+test_sample.*
+test_rec.*
