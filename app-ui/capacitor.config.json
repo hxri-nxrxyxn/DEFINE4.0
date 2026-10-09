@@ -1,0 +1,9 @@
+{
+  "appId": "com.define.voiceai",
+  "appName": "Define Voice AI",
+  "webDir": "build",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

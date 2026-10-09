@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Define Voice AI</string>
+    <string name="title_activity_main">Define Voice AI</string>
+    <string name="package_name">com.define.voiceai</string>
+    <string name="custom_url_scheme">com.define.voiceai</string>
+</resources>
