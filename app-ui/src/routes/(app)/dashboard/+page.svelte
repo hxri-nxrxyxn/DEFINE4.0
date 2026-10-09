@@ -1,14 +1,23 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { PieChart } from 'layerchart';
 	import { ActionBar } from '#lib/components/action-bar/index.js';
 	import * as Chart from '#lib/components/ui/chart/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
-	import { campaign } from '#lib/state/campaign.svelte.js';
+	import { Button } from '#lib/components/ui/button/index.js';
+	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
+	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Voicemail from '@lucide/svelte/icons/voicemail';
+	import PhoneCall from '@lucide/svelte/icons/phone-call';
+	import PhoneOff from '@lucide/svelte/icons/phone-off';
+	import PhoneForwarded from '@lucide/svelte/icons/phone-forwarded';
+	import CheckCircle2 from '@lucide/svelte/icons/check-circle-2';
+	import Pause from '@lucide/svelte/icons/pause';
+	import Play from '@lucide/svelte/icons/play';
+	import Square from '@lucide/svelte/icons/square';
 	import { toast } from 'svelte-sonner';
 
 	let loading = $state(true);
@@ -32,6 +41,129 @@
 	} satisfies Chart.ChartConfig;
 
 	let retries = $state<{ campaign: string; count: number }[]>([]);
+
+	// Automated Roster Campaign Execution Loop
+	let loopTimer: any = null;
+	let isExecutingStep = false;
+
+	function formatScriptForRecipient(template: string, name: string): string {
+		if (!template) return `Hello ${name}, this is an automated IVR call.`;
+		return template
+			.replace(/{name}/gi, name)
+			.replace(/\{recipient\}/gi, name)
+			.replace(/\b(Daison|Hari|Rahul|User)\b/gi, name);
+	}
+
+	async function runAutoDialerLoop() {
+		if (!campaign.isCampaignRunning || isExecutingStep) return;
+
+		const roster = campaign.recipients;
+		if (!roster || roster.length === 0) {
+			campaign.isCampaignRunning = false;
+			return;
+		}
+
+		if (campaign.currentCallIndex >= roster.length) {
+			campaign.isCampaignRunning = false;
+			campaign.currentCallStatus = 'completed';
+			toast.success('Campaign Completed!', {
+				description: `All ${roster.length} numbers in the call roster processed.`
+			});
+			return;
+		}
+
+		const current = roster[campaign.currentCallIndex];
+		campaign.currentCallPhone = current.phone;
+		campaign.currentCallName = current.name;
+
+		// 1. If currently idle, place call
+		if (campaign.currentCallStatus === 'idle') {
+			isExecutingStep = true;
+			campaign.currentCallStatus = 'dialing';
+			campaign.currentCallDurationSec = 0;
+
+			const formattedScript = formatScriptForRecipient(campaign.templateText, current.name);
+
+			const logItem: CallLogItem = {
+				phone: current.phone,
+				name: current.name,
+				language: current.language || 'Hindi',
+				status: 'dialing',
+				durationSeconds: 0,
+				callScriptText: formattedScript,
+				timestamp: Date.now()
+			};
+			campaign.callLogs = [logItem, ...campaign.callLogs];
+
+			toast.info(`Calling ${current.name}`, {
+				description: `Dialing ${current.phone}...`
+			});
+
+			try {
+				await triggerCall(current.phone, current.name, 10);
+			} catch (err) {
+				console.error('Trigger call failed:', err);
+			} finally {
+				isExecutingStep = false;
+			}
+			return;
+		}
+
+		// 2. Poll ongoing call status from bridge
+		try {
+			const status = await pollCallStatus();
+			if (status.call_state === 'CONNECTED') {
+				campaign.currentCallStatus = 'connected';
+				campaign.currentCallDurationSec = status.elapsed_seconds;
+
+				// Update top log item
+				if (campaign.callLogs[0]) {
+					campaign.callLogs[0].status = 'connected';
+					campaign.callLogs[0].durationSeconds = status.elapsed_seconds;
+				}
+			} else if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'dialing')) {
+				// Call finished (either 10s elapsed or hung up by recipient)
+				if (campaign.callLogs[0]) {
+					campaign.callLogs[0].status = 'completed';
+					campaign.callLogs[0].durationSeconds = Math.max(
+						campaign.currentCallDurationSec,
+						status.elapsed_seconds || 10
+					);
+				}
+
+				toast.success(`Completed call with ${current.name}`, {
+					description: `10s active duration met. Advancing to next contact...`
+				});
+
+				// Move to next contact in roster
+				campaign.currentCallIndex++;
+				campaign.currentCallDurationSec = 0;
+				campaign.currentCallStatus = 'idle';
+
+				// Update dashboard stats
+				stats[0].value = String(campaign.currentCallIndex);
+			}
+		} catch (e) {
+			console.error('Status polling error:', e);
+		}
+	}
+
+	function pauseResumeCampaign() {
+		if (campaign.isCampaignRunning) {
+			campaign.isCampaignRunning = false;
+			toast.info('Campaign Paused');
+		} else {
+			campaign.isCampaignRunning = true;
+			toast.info('Campaign Resumed');
+		}
+	}
+
+	async function stopCampaignPrematurely() {
+		campaign.isCampaignRunning = false;
+		campaign.currentCallStatus = 'stopped';
+		await terminateCall();
+		toast.info('Campaign Stopped');
+	}
 
 	async function loadAnalytics() {
 		try {
@@ -71,6 +203,12 @@
 
 	onMount(() => {
 		loadAnalytics();
+		// Poll loop every 800ms
+		loopTimer = setInterval(runAutoDialerLoop, 800);
+	});
+
+	onDestroy(() => {
+		if (loopTimer) clearInterval(loopTimer);
 	});
 
 	async function retryAll() {
@@ -114,6 +252,105 @@
 		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Dashboard</h1>
 		<p class="text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
 	</div>
+
+	<!-- Live IVR Sensor / Auto-Dialer Control Card -->
+	{#if campaign.recipients.length > 0}
+		<Card.Root class="border-primary/30 bg-primary/[0.03] overflow-hidden shadow-xs">
+			<Card.Header class="pb-2.5">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-2">
+						<div class="relative grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+							<PhoneCall class="size-4" />
+							{#if campaign.isCampaignRunning}
+								<span class="absolute -top-1 -right-1 flex size-2.5">
+									<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
+									<span class="relative inline-flex size-2.5 rounded-full bg-primary"></span>
+								</span>
+							{/if}
+						</div>
+						<div>
+							<Card.Title class="text-base font-semibold">Live IVR Dialer</Card.Title>
+							<Card.Description class="text-xs">
+								{campaign.isCampaignRunning
+									? 'Running auto-dialer sequence with 10s connected duration'
+									: 'Dialer ready. Click resume to initiate automated calling sequence'}
+							</Card.Description>
+						</div>
+					</div>
+
+					<div class="flex items-center gap-1.5">
+						<Button
+							variant="outline"
+							size="icon-sm"
+							class="size-8 rounded-lg"
+							onclick={pauseResumeCampaign}
+							title={campaign.isCampaignRunning ? 'Pause campaign' : 'Resume campaign'}
+						>
+							{#if campaign.isCampaignRunning}
+								<Pause class="size-3.5" />
+							{:else}
+								<Play class="size-3.5" />
+							{/if}
+						</Button>
+						{#if campaign.isCampaignRunning}
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								class="size-8 rounded-lg text-destructive hover:bg-destructive/10"
+								onclick={stopCampaignPrematurely}
+								title="Stop dialer"
+							>
+								<Square class="size-3.5 fill-current" />
+							</Button>
+						{/if}
+					</div>
+				</div>
+			</Card.Header>
+
+			<Card.Content class="space-y-3 pt-1">
+				<div class="grid grid-cols-3 gap-2 text-xs">
+					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+						<div class="text-muted-foreground text-[11px]">Roster Progress</div>
+						<div class="font-semibold text-foreground mt-0.5 text-sm tabular-nums">
+							{Math.min(campaign.currentCallIndex + (campaign.isCampaignRunning ? 1 : 0), campaign.recipients.length)} / {campaign.recipients.length}
+						</div>
+					</div>
+
+					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+						<div class="text-muted-foreground text-[11px]">Active Target</div>
+						<div class="font-semibold text-foreground mt-0.5 text-xs truncate" title={campaign.currentCallName}>
+							{campaign.currentCallName || campaign.recipients[campaign.currentCallIndex]?.name || 'Pending'}
+						</div>
+					</div>
+
+					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+						<div class="text-muted-foreground text-[11px]">Pickup Timer</div>
+						<div class="font-semibold text-primary mt-0.5 text-xs tabular-nums">
+							{#if campaign.currentCallStatus === 'connected'}
+								{campaign.currentCallDurationSec.toFixed(1)}s / 10s
+							{:else if campaign.currentCallStatus === 'dialing'}
+								Dialing...
+							{:else}
+								Idle
+							{/if}
+						</div>
+					</div>
+				</div>
+
+				<!-- Personalized Preview snippet -->
+				{#if campaign.isCampaignRunning && campaign.currentCallName}
+					<div class="rounded-lg border border-border/80 bg-muted/30 p-2.5 text-xs space-y-1">
+						<div class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+							Active personalized script:
+						</div>
+						<div class="italic text-foreground line-clamp-2 leading-relaxed">
+							"{formatScriptForRecipient(campaign.templateText, campaign.currentCallName)}"
+						</div>
+					</div>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+	{/if}
 
 	<div class="grid grid-cols-3 gap-3">
 		{#each stats as stat (stat.label)}
@@ -165,8 +402,6 @@
 			</div>
 		</Card.Content>
 	</Card.Root>
-
-
 
 	<Card.Root>
 		<Card.Header>

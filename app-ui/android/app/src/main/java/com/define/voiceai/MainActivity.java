@@ -13,10 +13,25 @@ import java.util.Arrays;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AutoDialerPlugin.class);
         super.onCreate(savedInstanceState);
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO, Manifest.permission.MODIFY_AUDIO_SETTINGS}, 1001);
+        String[] neededPermissions = new String[]{
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.MODIFY_AUDIO_SETTINGS,
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.ANSWER_PHONE_CALLS
+        };
+        boolean anyMissing = false;
+        for (String perm : neededPermissions) {
+            if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                anyMissing = true;
+                break;
+            }
+        }
+        if (anyMissing) {
+            ActivityCompat.requestPermissions(this, neededPermissions, 1001);
         }
 
         if (getBridge() != null && getBridge().getWebView() != null) {

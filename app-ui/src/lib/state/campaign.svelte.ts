@@ -3,6 +3,16 @@ import type { Recipient } from '#lib/csv.js';
 
 const STORAGE_KEY = 'campaign-draft';
 
+export interface CallLogItem {
+	phone: string;
+	name: string;
+	language: string;
+	status: 'pending' | 'dialing' | 'connected' | 'completed' | 'failed';
+	durationSeconds: number;
+	callScriptText?: string;
+	timestamp: number;
+}
+
 type PersistedState = {
 	userName: string;
 	templateText: string;
@@ -37,6 +47,16 @@ class CampaignStore {
 	// The roster is only ever replaced wholesale, so `$state.raw` avoids the
 	// cost of deeply proxying large CSV imports.
 	recipients = $state.raw<Recipient[]>([]);
+
+	// IVR Auto-Dialer Roster Campaign Execution State
+	isCampaignRunning = $state(false);
+	currentCallIndex = $state(0);
+	currentCallPhone = $state('');
+	currentCallName = $state('');
+	currentCallStatus = $state<'idle' | 'dialing' | 'connected' | 'completed' | 'stopped'>('idle');
+	currentCallDurationSec = $state(0);
+	targetCallDurationSec = $state(10);
+	callLogs = $state<CallLogItem[]>([]);
 
 	csvUploaded = $derived(this.recipients.length > 0);
 
@@ -97,6 +117,14 @@ class CampaignStore {
 	reset() {
 		this.templateText = '';
 		this.tested = false;
+		this.isCampaignRunning = false;
+		this.currentCallIndex = 0;
+		this.currentCallStatus = 'idle';
+	}
+
+	stopCampaign() {
+		this.isCampaignRunning = false;
+		this.currentCallStatus = 'stopped';
 	}
 }
 
