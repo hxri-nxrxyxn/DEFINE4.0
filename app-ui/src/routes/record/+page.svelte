@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
-	import { startRecording, type RecordingHandle } from '#lib/audio/recorder.js';
+	import { startConvAISession, type ConvAISession } from '#lib/audio/convai.js';
 	import { campaign } from '#lib/state/campaign.svelte.js';
 	import Mic from '@lucide/svelte/icons/mic';
 	import Check from '@lucide/svelte/icons/check';
@@ -10,115 +10,78 @@
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { toast } from 'svelte-sonner';
 
-	type Status = 'requesting' | 'listening' | 'processing' | 'error';
+	type Status = 'requesting' | 'listening' | 'speaking' | 'processing' | 'error';
 
 	let status = $state<Status>('requesting');
 	let level = $state(0);
 	let liveTranscript = $state('');
-	let handle: RecordingHandle | undefined;
-	let recognition: any = null;
+	let agentResponseText = $state('');
+	let convSession: ConvAISession | undefined;
 	let disposed = false;
 
 	onMount(() => {
 		void begin();
 		return () => {
 			disposed = true;
-			if (recognition) {
-				try { recognition.stop(); } catch {}
-			}
-			handle?.cancel();
+			convSession?.stop();
 		};
 	});
 
 	async function begin() {
 		status = 'requesting';
 		liveTranscript = '';
-
-		// Start Web Speech Recognition if supported in browser
-		if (typeof window !== 'undefined') {
-			const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-			if (SpeechRecognition) {
-				try {
-					recognition = new SpeechRecognition();
-					recognition.continuous = true;
-					recognition.interimResults = true;
-					recognition.lang = 'en-US';
-					recognition.onerror = (err: any) => {
-						console.warn('SpeechRecognition error:', err);
-					};
-					recognition.onresult = (event: any) => {
-						let text = '';
-						for (let i = 0; i < event.results.length; i++) {
-							text += event.results[i][0].transcript + ' ';
-						}
-						liveTranscript = text.trim();
-					};
-					recognition.start();
-				} catch (e) {
-					console.warn('SpeechRecognition initialization error:', e);
-				}
-			}
-		}
+		agentResponseText = '';
 
 		try {
-			const recording = await startRecording({
-				onLevel: (value) => (level = value),
-				onStop: (audio) => void finish(audio),
+			convSession = await startConvAISession({
+				onLevel: (val) => (level = val),
+				onUserMessage: (msg) => {
+					liveTranscript = msg;
+				},
+				onAgentMessage: (msg) => {
+					agentResponseText += msg + ' ';
+					status = 'speaking';
+					campaign.templateText = agentResponseText.trim();
+				},
+				onAudioPlay: () => {
+					status = 'speaking';
+				},
 				onError: (err) => {
-					console.error('Audio recorder error:', err);
+					console.error('ElevenLabs ConvAI session error:', err);
 					if (!disposed) status = 'error';
+				},
+				onClose: () => {
+					if (!disposed && status !== 'processing') {
+						// session finished naturally
+					}
 				}
 			});
 			if (disposed) {
-				recording.cancel();
+				convSession.stop();
 				return;
 			}
-			handle = recording;
 			status = 'listening';
 		} catch (e) {
-			console.error('Mic access failed:', e);
+			console.error('Failed to start ElevenLabs ConvAI session:', e);
 			if (!disposed) status = 'error';
 		}
 	}
 
-	async function finish(audio: Blob) {
+	async function finish() {
 		status = 'processing';
-		level = 0;
+		convSession?.stop();
 
-		if (recognition) {
-			try { recognition.stop(); } catch {}
-		}
-
-		const form = new FormData();
-		form.append('text', campaign.templateText);
-		form.append('transcript', liveTranscript);
-		form.append('audio', audio, 'recording.webm');
-
-		try {
-			const response = await fetch('/api/process', { method: 'POST', body: form });
-			const data = (await response.json()) as { text?: string; audio_base_64?: string };
-			if (data.text) {
-				campaign.templateText = data.text;
-				if (data.audio_base_64) {
-					try {
-						const player = new Audio(`data:audio/mpeg;base64,${data.audio_base_64}`);
-						void player.play().catch((e) => console.warn('Browser audio play error:', e));
-					} catch {}
-				}
-				toast.success('Voice script & audio generated with ElevenLabs AI!');
-			}
-		} catch (e) {
-			if (liveTranscript) {
-				campaign.templateText = `Hello {name},\n\n${liveTranscript}\n\nPress 1 to confirm, press 2 to reschedule, or press 9 to opt out.`;
-				toast.success('Voice transcript saved!');
-			}
+		const finalPrompt = agentResponseText.trim() || liveTranscript.trim() || campaign.templateText.trim();
+		if (finalPrompt) {
+			campaign.templateText = finalPrompt;
+			toast.success('Live ElevenLabs Conversational AI script saved!');
 		}
 
 		leave();
 	}
 
 	function stop() {
-		handle?.stop();
+		void finish();
 	}
 
 	function cancel() {
@@ -128,10 +91,7 @@
 	function leave() {
 		if (disposed) return;
 		disposed = true;
-		if (recognition) {
-			try { recognition.stop(); } catch {}
-		}
-		handle?.cancel();
+		convSession?.stop();
 		void goto('/template');
 	}
 </script>
@@ -152,20 +112,24 @@
 	<div class="mt-8 text-center space-y-2 max-w-sm">
 		<h1 class="text-xl font-semibold tracking-tight">
 			{#if status === 'requesting'}
-				Accessing microphone…
+				Connecting to ElevenLabs Voice Agent…
 			{:else if status === 'listening'}
-				Speak now…
+				Speak now to ElevenLabs Voice Agent…
+			{:else if status === 'speaking'}
+				ElevenLabs Agent is speaking…
 			{:else if status === 'processing'}
-				Processing with ElevenLabs AI…
+				Saving conversation script…
 			{:else}
-				Microphone error
+				Microphone / Session Error
 			{/if}
 		</h1>
 		<p class="text-xs text-muted-foreground min-h-12 px-2">
-			{#if liveTranscript}
-				"{liveTranscript}"
+			{#if agentResponseText}
+				"Agent: {agentResponseText}"
+			{:else if liveTranscript}
+				"You: {liveTranscript}"
 			{:else if status === 'listening'}
-				Describe your event details or message. We will generate the voice script.
+				Speak directly to the ElevenLabs Conversational Voice Agent.
 			{:else}
 				Please allow microphone access.
 			{/if}

@@ -124,6 +124,17 @@ async function synthesizeElevenLabsTTS(text: string): Promise<string> {
 	return '';
 }
 
+function generateDynamicScript(userPrompt: string): string {
+	const clean = userPrompt.trim();
+	if (!clean) {
+		return 'Hello {name}, this is an outbound call from DEFINE Voice AI to confirm your upcoming event participation.';
+	}
+	if (clean.toLowerCase().startsWith('hello ') || clean.includes('confirm your')) {
+		return clean;
+	}
+	return `Hello {name}, this is an important call regarding ${clean}. We would love to confirm your participation. Please let us know if you can attend.`;
+}
+
 export const POST: RequestHandler = async ({ request }) => {
 	let baseText = '';
 	let transcriptText = '';
@@ -174,27 +185,28 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		const promptInput = transcriptText.trim() || baseText.trim() || 'Organize a tech seminar invitation campaign.';
 
-		// 2. Connect to ElevenLabs Conversational AI Agent via WebSocket to generate agent response
+		// 2. Generate dynamic script from exact user prompt
+		const dynamicScript = generateDynamicScript(promptInput);
+
+		// 3. Connect to ElevenLabs Conversational AI Agent via WebSocket to query agent
 		const agentResponse = await queryElevenLabsConvAI(promptInput);
-		const finalTranscript = agentResponse || promptInput;
+		const finalScript = agentResponse && agentResponse.length > 10 ? agentResponse : dynamicScript;
 
-		// 3. Update ElevenLabs Conversational Agent config (first_message & prompt)
-		await updateElevenLabsAgent(finalTranscript);
+		// 4. Update ElevenLabs Conversational Agent config (first_message & prompt)
+		await updateElevenLabsAgent(finalScript);
 
-		const finalScript = composeScript(baseText, finalTranscript);
-
-		// 4. Synthesize ElevenLabs audio MP3 as base64 for instant browser audio playback
+		// 5. Synthesize fresh ElevenLabs audio MP3 as base64 for instant browser audio playback
 		const audioBase64 = await synthesizeElevenLabsTTS(finalScript);
 
 		return json({
 			status: 'success',
 			text: finalScript,
-			transcript: finalTranscript,
+			transcript: finalScript,
 			agent_response: agentResponse,
 			audio_base_64: audioBase64
 		});
 	} catch (e) {
-		const fallbackScript = composeScript(baseText, transcriptText || 'Please confirm your attendance for our upcoming event.');
+		const fallbackScript = generateDynamicScript(transcriptText || baseText);
 		const fallbackAudio = await synthesizeElevenLabsTTS(fallbackScript);
 		return json({
 			status: 'fallback',
