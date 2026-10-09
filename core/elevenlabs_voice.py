@@ -12,8 +12,53 @@ ELEVENLABS_API_KEY = os.environ.get(
 # Default voice (Rachel / Multilingual)
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
+ELEVENLABS_AGENT_ID = os.environ.get(
+    "ELEVENLABS_AGENT_ID",
+    "agent_8901m4gnv2a6f7xb5n0sbgbznz9f"
+)
+
 AUDIO_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audio_cache")
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+
+
+def update_conversational_agent(prompt_text: str, agent_id: str = ELEVENLABS_AGENT_ID) -> bool:
+    """
+    Dynamically updates ElevenLabs Conversational AI Agent (agentshrek) config:
+    - Sets agent's first_message to prompt_text
+    - Sets agent's system prompt instructions
+    """
+    try:
+        url = f"https://api.elevenlabs.io/v1/convai/agents/{agent_id}"
+        clean_text = prompt_text.strip() or "Hello! I am your DEFINE Conversational AI Agent."
+        
+        payload = {
+            "conversation_config": {
+                "agent": {
+                    "first_message": clean_text,
+                    "prompt": {
+                        "prompt": (
+                            f"You are an interactive conversational AI call assistant for DEFINE. "
+                            f"You are conducting an outbound campaign. Here is the campaign context: '{clean_text}'. "
+                            f"Speak naturally, answer recipient questions about dates, time, venue, and confirm RSVPs."
+                        )
+                    }
+                }
+            }
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json"
+            },
+            method="PATCH"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status == 200
+    except Exception as e:
+        print(f"[ElevenLabs ConvAI Agent Update Error]: {e}")
+        return False
 
 
 def synthesize_prompt_audio(text: str, call_id: Optional[str] = None, voice_id: str = DEFAULT_VOICE_ID) -> str:

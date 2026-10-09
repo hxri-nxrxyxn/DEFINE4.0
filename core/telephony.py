@@ -141,7 +141,7 @@ class ExotelClient:
             elif formatted_phone.startswith("+91"):
                 formatted_phone = "0" + formatted_phone[3:]
 
-            exoml_url = callback_url if (callback_url and ("my.exotel.com" in callback_url or callback_url.startswith("https://"))) else f"http://my.exotel.com/{self.account_sid}/exoml/start_voice/41956"
+            exoml_url = callback_url if (callback_url and "my.exotel.com" in callback_url) else f"http://my.exotel.com/{self.account_sid}/exoml/start_voice/41956"
 
             data = {
                 "From": formatted_phone,

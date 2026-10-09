@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.orchestrator import platform
 from core.analytics import analytics_engine
 from core.data_governance import consent_audit_ledger, erasure_audit_ledger, execute_right_to_erasure
-from core.elevenlabs_voice import synthesize_prompt_audio, get_exoml_response
+from core.elevenlabs_voice import synthesize_prompt_audio, get_exoml_response, update_conversational_agent
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -452,27 +452,31 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             
             call_id = f"call_{uuid.uuid4().hex[:12]}"
             
-            # 1. Synthesize text prompt into ElevenLabs TTS MP3 audio
+            # 1. Dynamically update ElevenLabs Conversational AI Agent config (first_message & prompt)
+            agent_updated = update_conversational_agent(template)
+            
+            # 2. Synthesize text prompt into ElevenLabs TTS MP3 audio
             audio_path = synthesize_prompt_audio(template, call_id=call_id)
             
-            # 2. Construct public ElevenLabs audio URL
-            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
-            audio_url = f"{public_base}/audio/{call_id}.mp3"
+            # 3. Construct public Cloudflare Tunnel ExoML endpoint URL for Exotel
+            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
+            exoml_url = f"{public_base}/api/exoml/start?call_id={call_id}"
             
-            # 3. Trigger live Exotel call using valid Exotel Applet flow
+            # 4. Trigger live Exotel call with ExoML URL
             call_res = platform.telephony.trigger_single_call(
                 recipient_phone=phone,
-                callback_url="",
-                custom_field=audio_url
+                callback_url=exoml_url,
+                custom_field=template
             )
             self._send_json({
                 "status": "success",
-                "message": f"ElevenLabs voice call dispatched to {phone}",
+                "message": f"ElevenLabs Conversational AI call dispatched to {phone}",
                 "target_phone": phone,
                 "recipient": name,
                 "call_id": call_id,
+                "agent_updated": agent_updated,
                 "audio_generated": bool(audio_path and os.path.exists(audio_path)),
-                "audio_url": audio_url,
+                "exoml_url": exoml_url,
                 "call_details": call_res
             })
 
