@@ -1,3 +1,3 @@
-#!/usr/bin/env bash
+#!/bin/bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python3 "$DIR/app.py" "$@"
+exec "$DIR/Bluetooth-Audio-Manager-x86_64.AppImage" "$@"

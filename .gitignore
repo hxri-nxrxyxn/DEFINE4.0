@@ -27,3 +27,8 @@ Thumbs.db
 .vscode/
 .idea/
 **/.idea/
+# Node / Frontend / Tauri build outputs
+**/node_modules/
+**/dist/
+**/dist-appimage/
+**/target/
