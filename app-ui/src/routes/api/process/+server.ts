@@ -87,18 +87,11 @@ async function queryElevenLabsConvAI(promptText: string): Promise<string> {
 }
 
 function composeScript(baseText: string, spokenText: string): string {
-	const body = spokenText.trim() || baseText.trim() || 'We invite you to join our event this weekend. Please let us know if you will be attending.';
-	if (body.includes('Press 1')) {
-		return body;
+	const body = spokenText.trim() || baseText.trim();
+	if (!body) {
+		return 'Hello! This is your ElevenLabs Conversational Voice AI assistant for DEFINE. How can I help you today?';
 	}
-	return [
-		'Hello {name},',
-		'',
-		body,
-		'',
-		'Press 1 to confirm, press 2 to reschedule, or press 9 to opt out.',
-		'This call is processed by DEFINE Voice AI.'
-	].join('\n');
+	return body;
 }
 
 async function synthesizeElevenLabsTTS(text: string): Promise<string> {
