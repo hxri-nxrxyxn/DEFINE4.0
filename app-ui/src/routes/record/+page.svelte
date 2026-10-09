@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { startConvAISession, type ConvAISession } from '#lib/audio/convai.js';
 	import { campaign, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
@@ -11,6 +12,10 @@
 	import { toast } from 'svelte-sonner';
 
 	type Status = 'requesting' | 'listening' | 'speaking' | 'processing' | 'done' | 'error';
+
+	// Assistant mode (default): turn what you say into a call script.
+	// Call mode (?call=1): play the script to a recipient and capture the outcome.
+	const callMode = page.url.searchParams.has('call');
 
 	const OUTCOME_LABEL: Record<string, string> = {
 		confirmed: 'Confirmed',
@@ -25,9 +30,11 @@
 	const contactLanguage = contact?.language || 'English';
 	const contactPhone = contact?.phone || '';
 
-	// Guard against a stale draft that captured the agent's own closing line
-	// (older builds wrote agent replies into templateText, which then became
-	// the next call's first message).
+	function stripTags(text: string): string {
+		return text.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+	}
+
+	// Guard against a stale draft that captured the agent's own closing line.
 	function cleanScript(text: string): string {
 		const t = text.trim();
 		if (!t) return '';
@@ -66,7 +73,7 @@
 		agentResponseText = '';
 
 		try {
-			// Configure the shared agent from the /template script before dialing (best effort).
+			// Configure the shared agent (assistant or caller) before connecting.
 			for (const base of ['http://localhost:8765', 'http://10.80.0.48:8765', '']) {
 				try {
 					const ep = base ? `${base}/api/convai/configure` : apiUrl('/api/convai/configure');
@@ -74,11 +81,12 @@
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
+							mode: callMode ? 'call' : 'build',
 							script: cleanScript(campaign.templateText),
 							name: contactName,
 							language: contactLanguage
 						}),
-						signal: AbortSignal.timeout(1500)
+						signal: AbortSignal.timeout(2000)
 					});
 					break;
 				} catch {
@@ -94,7 +102,7 @@
 						liveTranscript = msg;
 					},
 					onAgentMessage: (msg) => {
-						agentResponseText = msg;
+						agentResponseText = stripTags(msg);
 					},
 					onAudioPlay: () => {
 						status = 'speaking';
@@ -102,14 +110,15 @@
 					onAudioEnd: () => {
 						if (!disposed && status !== 'processing' && status !== 'done') status = 'listening';
 					},
+					onScript: (script) => handleScript(script),
 					onOutcome: (o) => handleOutcome(o),
 					onError: (err) => {
 						console.error('ElevenLabs ConvAI session error:', err);
 						if (!disposed) status = 'error';
 					},
 					onClose: () => {
-						if (disposed || outcome) return;
-						if (!userSpoke) finalize('no_response');
+						if (disposed) return;
+						if (callMode && !outcome && !userSpoke) finalize('no_response');
 					}
 				},
 				{ name: contactName, language: contactLanguage }
@@ -125,8 +134,23 @@
 		}
 	}
 
+	// Assistant mode: the agent handed us the composed script.
+	function handleScript(script: string) {
+		if (disposed) return;
+		const s = stripTags(script);
+		if (!s) return;
+		campaign.templateText = s;
+		status = 'done';
+		disposed = true;
+		try {
+			convSession?.stop();
+		} catch {}
+		toast.success('Script ready', { description: s });
+		setTimeout(() => void goto('/preview'), 1500);
+	}
+
 	function handleOutcome(o: string) {
-		if (disposed || outcome) return;
+		if (!callMode || disposed || outcome) return;
 		outcome = o;
 		status = 'processing';
 		// Let the agent finish its goodbye before hanging up.
@@ -143,7 +167,7 @@
 		try {
 			convSession?.stop();
 		} catch {}
-		if (contactPhone) {
+		if (callMode && contactPhone) {
 			try {
 				campaign.recordOutcome(contactPhone, o as OutcomeDisposition, agentResponseText || liveTranscript);
 			} catch {}
@@ -161,12 +185,16 @@
 	}
 
 	function stop() {
-		status = 'processing';
-		finalize(outcome ?? (userSpoke ? 'confirmed' : 'no_response'));
+		if (callMode) {
+			status = 'processing';
+			finalize(outcome ?? (userSpoke ? 'confirmed' : 'no_response'));
+		} else {
+			exit('/template');
+		}
 	}
 
 	function cancel() {
-		exit('/template');
+		exit(callMode ? '/dashboard' : '/template');
 	}
 </script>
 
@@ -188,26 +216,28 @@
 			{#if status === 'requesting'}
 				Connecting to ElevenLabs Voice Agent…
 			{:else if status === 'listening'}
-				Speak now, {contactName}…
+				{callMode ? `Speak now, ${contactName}…` : 'Tell the agent what the call should say…'}
 			{:else if status === 'speaking'}
 				ElevenLabs Agent is speaking…
 			{:else if status === 'processing'}
-				Ending the call…
+				{callMode ? 'Ending the call…' : 'Writing the script…'}
 			{:else if status === 'done'}
-				{OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete'}
+				{callMode ? (OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete') : 'Script ready'}
 			{:else}
 				Microphone / Session Error
 			{/if}
 		</h1>
 		<p class="text-xs text-muted-foreground min-h-12 px-2">
 			{#if status === 'done'}
-				{OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete'}
+				{callMode ? (OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete') : campaign.templateText}
 			{:else if agentResponseText}
 				"Agent: {agentResponseText}"
 			{:else if liveTranscript}
 				"You: {liveTranscript}"
 			{:else if status === 'listening'}
-				Speak naturally — the agent will wrap up the call automatically.
+				{callMode
+					? 'Speak naturally — the agent will wrap up the call automatically.'
+					: 'Describe the campaign, e.g. "remind my friends I\'m moving to America".'}
 			{:else}
 				Please allow microphone access.
 			{/if}
@@ -248,11 +278,16 @@
 	<div class="mb-4 text-center">
 		{#if status === 'listening'}
 			<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={stop}>
-				End call
+				{callMode ? 'End call' : 'Done'}
 			</Button>
 		{:else if status === 'done'}
-			<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={() => goto('/dashboard')}>
-				View dashboard
+			<Button
+				variant="outline"
+				size="sm"
+				class="rounded-xl px-4"
+				onclick={() => goto(callMode ? '/dashboard' : '/preview')}
+			>
+				{callMode ? 'View dashboard' : 'Preview'}
 			</Button>
 		{:else}
 			<Button variant="ghost" size="sm" class="rounded-xl px-4" onclick={cancel}>

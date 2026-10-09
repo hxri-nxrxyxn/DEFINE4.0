@@ -6,6 +6,7 @@ export type ConvAICallbacks = {
 	onAudioPlay?: () => void;
 	onAudioEnd?: () => void;
 	onOutcome?: (outcome: string) => void;
+	onScript?: (script: string) => void;
 	onError?: (err: any) => void;
 	onClose?: () => void;
 	onLevel?: (level: number) => void;
@@ -316,6 +317,9 @@ export async function startConvAISession(
 				const tool = data.client_tool_call;
 				if (tool?.tool_name === 'report_outcome') {
 					reportOutcome(tool.parameters?.outcome ?? '');
+				} else if (tool?.tool_name === 'set_script') {
+					const script = tool.parameters?.script;
+					if (script) callbacks.onScript?.(String(script));
 				}
 				socket.send(
 					JSON.stringify({

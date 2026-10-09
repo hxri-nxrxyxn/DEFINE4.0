@@ -72,7 +72,7 @@
 	function callRecipient(recipient: Recipient) {
 		campaign.setActiveRecipient(recipient.phone);
 		showModal = false;
-		void goto('/record');
+		void goto('/record?call=1');
 	}
 
 	function saveRoster() {
