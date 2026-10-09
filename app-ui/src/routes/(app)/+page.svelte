@@ -9,6 +9,7 @@
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import PhoneCall from '@lucide/svelte/icons/phone-call';
 	import X from '@lucide/svelte/icons/x';
 	import { toast } from 'svelte-sonner';
 
@@ -66,6 +67,12 @@
 	function clearAllRows() {
 		contactRows = [makeRow()];
 		toast.info('All rows cleared');
+	}
+
+	function callRecipient(recipient: Recipient) {
+		campaign.setActiveRecipient(recipient.phone);
+		showModal = false;
+		void goto('/record');
 	}
 
 	function saveRoster() {
@@ -181,9 +188,10 @@
 							<table class="w-full table-fixed text-xs">
 								<thead class="bg-muted/50 sticky top-0 z-10 border-b border-border">
 									<tr class="text-muted-foreground text-left">
-										<th class="h-8 px-3 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[36%]">Name</th>
-										<th class="h-8 px-2 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[40%]">Phone</th>
-										<th class="h-8 px-3 text-right align-middle text-xs font-medium text-muted-foreground tracking-tight w-[24%]">Language</th>
+										<th class="h-8 px-3 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[33%]">Name</th>
+										<th class="h-8 px-2 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[35%]">Phone</th>
+										<th class="h-8 px-2 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[20%]">Language</th>
+										<th class="h-8 px-3 text-right align-middle text-xs font-medium text-muted-foreground tracking-tight w-[12%]">Call</th>
 									</tr>
 								</thead>
 								<tbody class="divide-y divide-border/40">
@@ -195,8 +203,19 @@
 											<td class="py-2.5 px-2 align-middle text-xs font-mono text-muted-foreground truncate" title={recipient.phone}>
 												{recipient.phone}
 											</td>
-											<td class="py-2.5 px-3 align-middle text-right text-xs text-muted-foreground font-normal truncate" title={recipient.language}>
+											<td class="py-2.5 px-2 align-middle text-left text-xs text-muted-foreground font-normal truncate" title={recipient.language}>
 												{recipient.language || 'Hindi'}
+											</td>
+											<td class="py-2.5 px-3 align-middle text-right">
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													class="text-primary hover:text-primary hover:bg-primary/10"
+													title="Call {recipient.name}"
+													onclick={() => callRecipient(recipient)}
+												>
+													<PhoneCall class="size-4" />
+												</Button>
 											</td>
 										</tr>
 									{/each}

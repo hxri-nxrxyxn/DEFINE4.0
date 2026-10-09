@@ -23,14 +23,16 @@
 	let loading = $state(true);
 	let retrying = $state(false);
 
-	let stats = $state([
+	let fetchedStats = $state([
 		{ label: 'Calls placed', value: '0' },
 		{ label: 'Queued retries', value: '0' }
 	]);
 
-	let connectRatePct = $state(0);
+	let fetchedConnectRate = $state(0);
 
-	let languageData = $state<{ key: string; label: string; value: number; color: string }[]>([]);
+	let fetchedLanguageData = $state<{ key: string; label: string; value: number; color: string }[]>(
+		[]
+	);
 
 	const languageConfig = {
 		hi: { label: 'Hindi', color: 'var(--chart-1)' },
@@ -40,7 +42,60 @@
 		ml: { label: 'Malayalam', color: 'var(--chart-5)' }
 	} satisfies Chart.ChartConfig;
 
-	let retries = $state<{ campaign: string; count: number }[]>([]);
+	const COLORS = [
+		'var(--chart-1)',
+		'var(--chart-2)',
+		'var(--chart-3)',
+		'var(--chart-4)',
+		'var(--chart-5)'
+	];
+
+	// Prefer live campaign outcomes over the backend/mock analytics.
+	const hasLocal = $derived(campaign.recipients.length > 0);
+	const attempted = $derived(
+		Math.max(campaign.recipients.length - campaign.summary.pending, campaign.currentCallIndex)
+	);
+
+	const stats = $derived(
+		hasLocal
+			? [
+					{ label: 'Calls placed', value: String(attempted) },
+					{ label: 'Queued retries', value: String(campaign.retryList.length) }
+				]
+			: fetchedStats
+	);
+
+	const connectRatePct = $derived(
+		hasLocal
+			? Math.round((campaign.summary.confirmed / Math.max(attempted, 1)) * 100)
+			: fetchedConnectRate
+	);
+
+	const localLanguageData = $derived.by(() => {
+		const map = new Map<string, number>();
+		for (const r of campaign.recipients) {
+			const label = r.language || 'Hindi';
+			map.set(label, (map.get(label) ?? 0) + 1);
+		}
+		return [...map.entries()].map(([label, value], idx) => ({
+			key: label.toLowerCase(),
+			label,
+			value,
+			color: COLORS[idx % COLORS.length]
+		}));
+	});
+
+	const languageData = $derived(hasLocal ? localLanguageData : fetchedLanguageData);
+
+	const retries = $derived(
+		hasLocal
+			? campaign.retryList.map((r) => ({
+					phone: r.phone,
+					campaign: r.name,
+					count: campaign.outcomes[r.phone]?.attempts ?? 1
+				}))
+			: []
+	);
 
 	// Automated Roster Campaign Execution Loop
 	let loopTimer: any = null;
@@ -139,9 +194,6 @@
 				campaign.currentCallIndex++;
 				campaign.currentCallDurationSec = 0;
 				campaign.currentCallStatus = 'idle';
-
-				// Update dashboard stats
-				stats[0].value = String(campaign.currentCallIndex);
 			}
 		} catch (e) {
 			console.error('Status polling error:', e);
@@ -171,26 +223,19 @@
 			if (res.ok) {
 				const data = await res.json();
 				if (data.kpis) {
-					stats = [
+					fetchedStats = [
 						{ label: 'Calls placed', value: Number(data.kpis.total_calls).toLocaleString() },
-						{ label: 'Queued retries', value: String(data.kpis.retryable_non_responders ?? 37) }
+						{ label: 'Queued retries', value: String(data.kpis.retryable_non_responders ?? 0) }
 					];
-					connectRatePct = Math.round(data.kpis.connect_rate_pct ?? 68);
+					fetchedConnectRate = Math.round(data.kpis.connect_rate_pct ?? 0);
 				}
 				if (data.by_language) {
-					const colors = [
-						'var(--chart-1)',
-						'var(--chart-2)',
-						'var(--chart-3)',
-						'var(--chart-4)',
-						'var(--chart-5)'
-					];
 					const entries = Object.entries(data.by_language);
-					languageData = entries.map(([name, stat]: [string, any], idx) => ({
+					fetchedLanguageData = entries.map(([name, stat]: [string, any], idx) => ({
 						key: name.toLowerCase(),
 						label: name,
 						value: stat.confirmed || stat.total || 0,
-						color: colors[idx % colors.length]
+						color: COLORS[idx % COLORS.length]
 					}));
 				}
 			}
@@ -214,18 +259,13 @@
 	async function retryAll() {
 		retrying = true;
 		try {
-			const res = await fetch('/api/retry', { method: 'POST' });
-			const result = await res.json();
-			toast.success('Retrying non-responders', {
-				description: `${result.queued_retries || 37} calls queued for the next window.`
-			});
-			stats[1].value = '0';
-			retries = [];
+			await fetch('/api/retry', { method: 'POST' });
 		} catch (e) {
-			toast.success('Retrying non-responders', {
-				description: '37 calls queued for the next window.'
-			});
+			// offline fallback - retry list is derived locally anyway
 		} finally {
+			toast.success('Retrying non-responders', {
+				description: `${campaign.retryList.length} calls queued for the next window.`
+			});
 			retrying = false;
 		}
 	}
@@ -410,7 +450,7 @@
 		</Card.Header>
 		<Card.Content class="space-y-3">
 			{#if retries.length > 0}
-				{#each retries as item (item.campaign)}
+				{#each retries as item (item.phone)}
 					<div class="flex items-center justify-between gap-3">
 						<div class="flex items-center gap-2">
 							<Voicemail class="size-4 text-muted-foreground" />

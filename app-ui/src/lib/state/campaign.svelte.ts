@@ -13,12 +13,28 @@ export interface CallLogItem {
 	timestamp: number;
 }
 
+export type OutcomeDisposition =
+	| 'confirmed'
+	| 'declined'
+	| 'not_available'
+	| 'opt_out'
+	| 'no_response';
+
+export type CallOutcome = {
+	disposition: OutcomeDisposition;
+	attempts: number;
+	at: number;
+	transcript?: string;
+};
+
 type PersistedState = {
 	userName: string;
 	templateText: string;
 	tested: boolean;
 	csvName: string;
 	recipients: Recipient[];
+	outcomes: Record<string, CallOutcome>;
+	activePhone: string;
 };
 
 const DEFAULTS: PersistedState = {
@@ -26,7 +42,9 @@ const DEFAULTS: PersistedState = {
 	templateText: '',
 	tested: false,
 	csvName: '',
-	recipients: []
+	recipients: [],
+	outcomes: {},
+	activePhone: ''
 };
 
 function read(): PersistedState {
@@ -58,7 +76,41 @@ class CampaignStore {
 	targetCallDurationSec = $state(10);
 	callLogs = $state<CallLogItem[]>([]);
 
+	/** Per-recipient call outcomes, keyed by phone number. */
+	outcomes = $state<Record<string, CallOutcome>>({});
+	/** Phone of the recipient currently being called. */
+	activePhone = $state('');
+
 	csvUploaded = $derived(this.recipients.length > 0);
+
+	activeRecipient = $derived(
+		this.recipients.find((r) => r.phone === this.activePhone) ?? this.recipients[0] ?? null
+	);
+
+	/** Recipients that need another attempt (no answer / not available). */
+	retryList = $derived(
+		this.recipients.filter((r) => {
+			const d = this.outcomes[r.phone]?.disposition;
+			return d === 'no_response' || d === 'not_available';
+		})
+	);
+
+	summary = $derived.by(() => {
+		const counts: Record<OutcomeDisposition | 'pending', number> = {
+			confirmed: 0,
+			declined: 0,
+			not_available: 0,
+			opt_out: 0,
+			no_response: 0,
+			pending: 0
+		};
+		for (const r of this.recipients) {
+			const o = this.outcomes[r.phone];
+			if (o) counts[o.disposition] += 1;
+			else counts.pending += 1;
+		}
+		return counts;
+	});
 
 	#saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -71,6 +123,8 @@ class CampaignStore {
 		this.tested = saved.tested;
 		this.csvName = saved.csvName;
 		this.recipients = saved.recipients;
+		this.outcomes = saved.outcomes ?? {};
+		this.activePhone = saved.activePhone ?? '';
 
 		$effect.root(() => {
 			$effect(() => {
@@ -81,6 +135,8 @@ class CampaignStore {
 				void this.tested;
 				void this.csvName;
 				void this.recipients;
+				void this.outcomes;
+				void this.activePhone;
 				this.#scheduleSave();
 			});
 		});
@@ -94,7 +150,9 @@ class CampaignStore {
 				templateText: this.templateText,
 				tested: this.tested,
 				csvName: this.csvName,
-				recipients: $state.snapshot(this.recipients)
+				recipients: $state.snapshot(this.recipients),
+				outcomes: $state.snapshot(this.outcomes),
+				activePhone: this.activePhone
 			};
 			try {
 				sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -112,6 +170,25 @@ class CampaignStore {
 	clearRecipients() {
 		this.csvName = '';
 		this.recipients = [];
+		this.outcomes = {};
+		this.activePhone = '';
+	}
+
+	setActiveRecipient(phone: string) {
+		this.activePhone = phone;
+	}
+
+	recordOutcome(phone: string, disposition: OutcomeDisposition, transcript?: string) {
+		const prev = this.outcomes[phone];
+		this.outcomes = {
+			...this.outcomes,
+			[phone]: {
+				disposition,
+				attempts: (prev?.attempts ?? 0) + 1,
+				at: Date.now(),
+				transcript
+			}
+		};
 	}
 
 	reset() {

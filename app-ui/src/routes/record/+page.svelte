@@ -3,21 +3,35 @@
 	import { onMount } from 'svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { startConvAISession, type ConvAISession } from '#lib/audio/convai.js';
-	import { campaign } from '#lib/state/campaign.svelte.js';
+	import { campaign, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
 	import Mic from '@lucide/svelte/icons/mic';
 	import Check from '@lucide/svelte/icons/check';
 	import X from '@lucide/svelte/icons/x';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { toast } from 'svelte-sonner';
 
-	type Status = 'requesting' | 'listening' | 'speaking' | 'processing' | 'error';
+	type Status = 'requesting' | 'listening' | 'speaking' | 'processing' | 'done' | 'error';
+
+	const OUTCOME_LABEL: Record<string, string> = {
+		confirmed: 'Confirmed',
+		not_available: 'Not available — moved to retry list',
+		declined: 'Declined',
+		opt_out: 'Opted out',
+		no_response: 'No response — moved to retry list'
+	};
+
+	const contact = campaign.activeRecipient;
+	const contactName = contact?.name?.trim() || campaign.userName || 'there';
+	const contactLanguage = contact?.language || 'English';
+	const contactPhone = contact?.phone || '';
 
 	let status = $state<Status>('requesting');
 	let level = $state(0);
 	let liveTranscript = $state('');
 	let agentResponseText = $state('');
+	let outcome = $state<string | null>(null);
 	let convSession: ConvAISession | undefined;
 	let disposed = false;
+	let userSpoke = false;
 
 	onMount(() => {
 		void begin();
@@ -33,29 +47,45 @@
 		agentResponseText = '';
 
 		try {
-			convSession = await startConvAISession({
-				onLevel: (val) => (level = val),
-				onUserMessage: (msg) => {
-					liveTranscript = msg;
-				},
-				onAgentMessage: (msg) => {
-					agentResponseText = msg;
-					status = 'speaking';
-					campaign.templateText = msg.trim();
-				},
-				onAudioPlay: () => {
-					status = 'speaking';
-				},
-				onError: (err) => {
-					console.error('ElevenLabs ConvAI session error:', err);
-					if (!disposed) status = 'error';
-				},
-				onClose: () => {
-					if (!disposed && status !== 'processing') {
-						// session finished naturally
+			// Configure the shared agent from the /template script before dialing.
+			await fetch('/api/convai/configure', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					script: campaign.templateText,
+					name: contactName,
+					language: contactLanguage
+				})
+			}).catch(() => {});
+
+			convSession = await startConvAISession(
+				{
+					onLevel: (val) => (level = val),
+					onUserMessage: (msg) => {
+						userSpoke = true;
+						liveTranscript = msg;
+					},
+					onAgentMessage: (msg) => {
+						agentResponseText = msg;
+					},
+					onAudioPlay: () => {
+						status = 'speaking';
+					},
+					onAudioEnd: () => {
+						if (!disposed && status !== 'processing' && status !== 'done') status = 'listening';
+					},
+					onOutcome: (o) => handleOutcome(o),
+					onError: (err) => {
+						console.error('ElevenLabs ConvAI session error:', err);
+						if (!disposed) status = 'error';
+					},
+					onClose: () => {
+						if (disposed || outcome) return;
+						if (!userSpoke) finalize('no_response');
 					}
-				}
-			});
+				},
+				{ name: contactName, language: contactLanguage }
+			);
 			if (disposed) {
 				convSession.stop();
 				return;
@@ -67,28 +97,35 @@
 		}
 	}
 
-	async function finish() {
+	function handleOutcome(o: string) {
+		if (disposed || outcome) return;
+		outcome = o;
 		status = 'processing';
+		// Let the agent finish its goodbye before hanging up.
+		setTimeout(() => {
+			if (!disposed) finalize(o);
+		}, 2500);
+	}
+
+	function finalize(o: string) {
+		if (disposed) return;
+		disposed = true;
 		convSession?.stop();
-
-		const finalPrompt = agentResponseText.trim() || liveTranscript.trim() || campaign.templateText.trim();
-		if (finalPrompt) {
-			campaign.templateText = finalPrompt;
-			toast.success('Live ElevenLabs Conversational AI script saved!');
+		if (contactPhone) {
+			campaign.recordOutcome(contactPhone, o as OutcomeDisposition, agentResponseText || liveTranscript);
 		}
-
-		leave();
+		toast.success(`Call ended — ${OUTCOME_LABEL[o] ?? o}`);
+		status = 'done';
+		outcome = o;
+		setTimeout(() => void goto('/dashboard'), 1600);
 	}
 
 	function stop() {
-		void finish();
+		status = 'processing';
+		finalize(outcome ?? (userSpoke ? 'confirmed' : 'no_response'));
 	}
 
 	function cancel() {
-		leave();
-	}
-
-	function leave() {
 		if (disposed) return;
 		disposed = true;
 		convSession?.stop();
@@ -114,22 +151,26 @@
 			{#if status === 'requesting'}
 				Connecting to ElevenLabs Voice Agent…
 			{:else if status === 'listening'}
-				Speak now to ElevenLabs Voice Agent…
+				Speak now, {contactName}…
 			{:else if status === 'speaking'}
 				ElevenLabs Agent is speaking…
 			{:else if status === 'processing'}
-				Saving conversation script…
+				Ending the call…
+			{:else if status === 'done'}
+				{OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete'}
 			{:else}
 				Microphone / Session Error
 			{/if}
 		</h1>
 		<p class="text-xs text-muted-foreground min-h-12 px-2">
-			{#if agentResponseText}
+			{#if status === 'done'}
+				{OUTCOME_LABEL[outcome ?? ''] ?? 'Call complete'}
+			{:else if agentResponseText}
 				"Agent: {agentResponseText}"
 			{:else if liveTranscript}
 				"You: {liveTranscript}"
 			{:else if status === 'listening'}
-				Speak directly to the ElevenLabs Conversational Voice Agent.
+				Speak naturally — the agent will wrap up the call automatically.
 			{:else}
 				Please allow microphone access.
 			{/if}
@@ -157,6 +198,8 @@
 		>
 			{#if status === 'processing'}
 				<div class="size-8 rounded-full border-4 border-primary-foreground border-t-transparent animate-spin"></div>
+			{:else if status === 'done'}
+				<Check class="size-10" />
 			{:else if status === 'listening'}
 				<Check class="size-10" />
 			{:else}
@@ -168,7 +211,11 @@
 	<div class="mb-4 text-center">
 		{#if status === 'listening'}
 			<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={stop}>
-				Done Recording
+				End call
+			</Button>
+		{:else if status === 'done'}
+			<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={() => goto('/dashboard')}>
+				View dashboard
 			</Button>
 		{:else}
 			<Button variant="ghost" size="sm" class="rounded-xl px-4" onclick={cancel}>

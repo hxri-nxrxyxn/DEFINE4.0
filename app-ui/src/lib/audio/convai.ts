@@ -2,9 +2,20 @@ export type ConvAICallbacks = {
 	onAgentMessage?: (text: string) => void;
 	onUserMessage?: (text: string) => void;
 	onAudioPlay?: () => void;
+	onAudioEnd?: () => void;
+	onOutcome?: (outcome: string) => void;
 	onError?: (err: any) => void;
 	onClose?: () => void;
 	onLevel?: (level: number) => void;
+};
+
+export type ConvAISessionOptions = {
+	/** Recipient context injected as ElevenLabs dynamic variables. */
+	name?: string;
+	city?: string;
+	language?: string;
+	/** Milliseconds of mutual silence before the call is treated as "no response". */
+	silenceTimeoutMs?: number;
 };
 
 export type ConvAISession = {
@@ -12,7 +23,56 @@ export type ConvAISession = {
 	sendText: (text: string) => void;
 };
 
-export async function startConvAISession(callbacks: ConvAICallbacks): Promise<ConvAISession> {
+const TARGET_SAMPLE_RATE = 16000;
+
+function bytesToBase64(bytes: Uint8Array): string {
+	let binary = '';
+	const chunk = 0x8000;
+	for (let i = 0; i < bytes.length; i += chunk) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+	}
+	return btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	return bytes;
+}
+
+/** Convert float samples to little-endian PCM16. */
+function floatsToPcm16(input: Float32Array): Int16Array {
+	const out = new Int16Array(input.length);
+	for (let i = 0; i < input.length; i++) {
+		const s = Math.max(-1, Math.min(1, input[i]));
+		out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+	}
+	return out;
+}
+
+/** Linear-interpolated downsample fallback for devices that ignore the 16kHz request. */
+function downsampleTo16k(input: Float32Array, from: number): Int16Array {
+	const ratio = from / TARGET_SAMPLE_RATE;
+	const outLen = Math.max(1, Math.round(input.length / ratio));
+	const out = new Int16Array(outLen);
+	for (let i = 0; i < outLen; i++) {
+		const pos = i * ratio;
+		const i0 = Math.floor(pos);
+		const i1 = Math.min(i0 + 1, input.length - 1);
+		const frac = pos - i0;
+		const s = input[i0] * (1 - frac) + input[i1] * frac;
+		out[i] = Math.max(-1, Math.min(1, s)) * (s < 0 ? 0x8000 : 0x7fff);
+	}
+	return out;
+}
+
+export async function startConvAISession(
+	callbacks: ConvAICallbacks,
+	options: ConvAISessionOptions = {}
+): Promise<ConvAISession> {
+	const silenceTimeoutMs = options.silenceTimeoutMs ?? 15000;
+
 	// 1. Get signed URL from backend
 	const res = await fetch('/api/convai/signed_url');
 	const { signed_url } = await res.json();
@@ -20,89 +80,151 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 		throw new Error('Could not obtain ElevenLabs signed URL');
 	}
 
-	// 2. Open WebSocket connection directly to ElevenLabs ConvAI Agent
-	const socket = new WebSocket(signed_url);
-	let audioCtx: AudioContext | null = null;
-	let micStream: MediaStream | null = null;
-	let processor: ScriptProcessorNode | null = null;
-	let audioQueue: Uint8Array[] = [];
-	let isPlaying = false;
-
 	const AudioContextCtor: typeof AudioContext =
 		window.AudioContext || (window as any).webkitAudioContext;
 
-	// Created lazily and resumed explicitly: browsers block eager AudioContext
-	// construction outside a user gesture, which would silence playback.
-	let audioPlayerCtx: AudioContext | null = null;
-	const getPlayerCtx = () => {
-		if (!audioPlayerCtx || audioPlayerCtx.state === 'closed') {
-			audioPlayerCtx = new AudioContextCtor({ sampleRate: 16000 });
-		}
-		return audioPlayerCtx;
+	// 2. Open WebSocket connection directly to ElevenLabs ConvAI Agent
+	const socket = new WebSocket(signed_url);
+
+	// --- Microphone capture (sent as 16kHz PCM16 "user_audio_chunk") ---
+	let micCtx: AudioContext | null = null;
+	let micStream: MediaStream | null = null;
+	let processor: ScriptProcessorNode | null = null;
+	let muteGain: GainNode | null = null;
+
+	// --- Playback: ElevenLabs streams raw PCM16 @16kHz (not a decodable container) ---
+	let playerCtx: AudioContext | null = null;
+	let nextPlaybackTime = 0;
+	let lastScheduled: AudioBufferSourceNode | null = null;
+	let audioEndTimer: ReturnType<typeof setTimeout> | undefined;
+	const activeSources = new Set<AudioBufferSourceNode>();
+
+	// --- Outcome detection ---
+	let outcomeReported = false;
+	let lastUserAt = Date.now();
+	const reportOutcome = (outcome: string) => {
+		if (outcomeReported || !outcome) return;
+		outcomeReported = true;
+		clearInterval(silenceTimer);
+		callbacks.onOutcome?.(outcome);
 	};
 
-	const playNextChunk = async () => {
-		if (audioQueue.length === 0) {
-			isPlaying = false;
+	const getPlayerCtx = () => {
+		if (!playerCtx || playerCtx.state === 'closed') {
+			playerCtx = new AudioContextCtor();
+			nextPlaybackTime = 0;
+		}
+		return playerCtx;
+	};
+
+	const stopPlayback = () => {
+		clearTimeout(audioEndTimer);
+		for (const source of activeSources) {
+			try {
+				source.onended = null;
+				source.stop();
+			} catch {}
+		}
+		activeSources.clear();
+		lastScheduled = null;
+		if (playerCtx) nextPlaybackTime = playerCtx.currentTime;
+	};
+
+	const enqueuePcm = (bytes: Uint8Array) => {
+		const ctx = getPlayerCtx();
+		if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+		clearTimeout(audioEndTimer);
+
+		const sampleCount = Math.floor(bytes.byteLength / 2);
+		if (sampleCount === 0) return;
+
+		const view = new DataView(bytes.buffer, bytes.byteOffset, sampleCount * 2);
+		const buffer = ctx.createBuffer(1, sampleCount, TARGET_SAMPLE_RATE);
+		const channel = buffer.getChannelData(0);
+		for (let i = 0; i < sampleCount; i++) {
+			channel[i] = view.getInt16(i * 2, true) / 0x8000;
+		}
+
+		const source = ctx.createBufferSource();
+		source.buffer = buffer;
+		source.connect(ctx.destination);
+
+		const startAt = Math.max(ctx.currentTime, nextPlaybackTime);
+		source.start(startAt);
+		nextPlaybackTime = startAt + buffer.duration;
+
+		activeSources.add(source);
+		lastScheduled = source;
+		source.onended = () => {
+			activeSources.delete(source);
+			if (source === lastScheduled && activeSources.size === 0) {
+				audioEndTimer = setTimeout(() => {
+					if (activeSources.size === 0) callbacks.onAudioEnd?.();
+				}, 300);
+			}
+		};
+		callbacks.onAudioPlay?.();
+	};
+
+	// If neither side speaks for a while and the agent is idle, count it as no response.
+	const silenceTimer = setInterval(() => {
+		if (outcomeReported) return;
+		if (activeSources.size > 0) {
+			lastUserAt = Date.now();
 			return;
 		}
-		isPlaying = true;
-		const chunk = audioQueue.shift()!;
-		try {
-			const ctx = getPlayerCtx();
-			if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
-			const decoded = await ctx.decodeAudioData(chunk.buffer.slice(0) as ArrayBuffer);
-			const source = ctx.createBufferSource();
-			source.buffer = decoded;
-			source.connect(ctx.destination);
-			source.onended = () => playNextChunk();
-			source.start();
-			callbacks.onAudioPlay?.();
-		} catch (e) {
-			playNextChunk();
-		}
-	};
+		if (Date.now() - lastUserAt > silenceTimeoutMs) reportOutcome('no_response');
+	}, 1000);
+
+	const dynamicVariables: Record<string, string> = {};
+	if (options.name) dynamicVariables.name = options.name;
+	if (options.city) dynamicVariables.city = options.city;
+	if (options.language) dynamicVariables.language = options.language;
 
 	socket.onopen = async () => {
+		// Provide dynamic variables up front (the first message requires them).
+		socket.send(
+			JSON.stringify({
+				type: 'conversation_initiation_client_data',
+				dynamic_variables: dynamicVariables
+			})
+		);
+
 		try {
 			micStream = await navigator.mediaDevices.getUserMedia({
-				audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+				audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
 			});
-			audioCtx = new AudioContextCtor({ sampleRate: 16000 });
-			if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
-			const micSource = audioCtx.createMediaStreamSource(micStream);
-			processor = audioCtx.createScriptProcessor(2048, 1, 1);
 
+			try {
+				micCtx = new AudioContextCtor({ sampleRate: TARGET_SAMPLE_RATE });
+			} catch {
+				micCtx = new AudioContextCtor();
+			}
+			if (micCtx.state === 'suspended') await micCtx.resume().catch(() => {});
+			const inputRate = micCtx.sampleRate;
+
+			const micSource = micCtx.createMediaStreamSource(micStream);
+			processor = micCtx.createScriptProcessor(2048, 1, 1);
+
+			muteGain = micCtx.createGain();
+			muteGain.gain.value = 0;
 			micSource.connect(processor);
-			processor.connect(audioCtx.destination);
+			processor.connect(muteGain);
+			muteGain.connect(micCtx.destination);
 
 			processor.onaudioprocess = (evt) => {
 				if (socket.readyState !== WebSocket.OPEN) return;
-				const inputData = evt.inputBuffer.getChannelData(0);
+				const input = evt.inputBuffer.getChannelData(0);
 
 				let sum = 0;
-				for (let i = 0; i < inputData.length; i++) {
-					sum += inputData[i] * inputData[i];
-				}
-				const rms = Math.sqrt(sum / inputData.length);
-				callbacks.onLevel?.(Math.min(1, rms * 5));
+				for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+				callbacks.onLevel?.(Math.min(1, Math.sqrt(sum / input.length) * 5));
 
-				const pcm16 = new Int16Array(inputData.length);
-				for (let i = 0; i < inputData.length; i++) {
-					const s = Math.max(-1, Math.min(1, inputData[i]));
-					pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-				}
-				const u8 = new Uint8Array(pcm16.buffer);
-				let binary = '';
-				for (let i = 0; i < u8.length; i++) {
-					binary += String.fromCharCode(u8[i]);
-				}
-				const base64Audio = btoa(binary);
+				const pcm16 =
+					inputRate === TARGET_SAMPLE_RATE ? floatsToPcm16(input) : downsampleTo16k(input, inputRate);
 
 				socket.send(
-					JSON.stringify({
-						user_audio_chunk: base64Audio
-					})
+					JSON.stringify({ user_audio_chunk: bytesToBase64(new Uint8Array(pcm16.buffer)) })
 				);
 			};
 		} catch (e) {
@@ -111,49 +233,78 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 	};
 
 	socket.onmessage = (evt) => {
+		let data: any;
 		try {
-			const data = JSON.parse(evt.data);
-			if (data.type === 'agent_response') {
+			data = JSON.parse(evt.data);
+		} catch {
+			return;
+		}
+
+		switch (data.type) {
+			case 'agent_response': {
 				const text = data.agent_response_event?.agent_response;
 				if (text) callbacks.onAgentMessage?.(text);
-			} else if (data.type === 'user_transcript') {
-				const text = data.user_transcript_event?.user_transcript;
-				if (text) callbacks.onUserMessage?.(text);
-			} else if (data.type === 'audio') {
-				const base64 = data.audio_event?.audio_base_64;
-				if (base64) {
-					const binaryStr = atob(base64);
-					const len = binaryStr.length;
-					const bytes = new Uint8Array(len);
-					for (let i = 0; i < len; i++) {
-						bytes[i] = binaryStr.charCodeAt(i);
-					}
-					audioQueue.push(bytes);
-					if (!isPlaying) playNextChunk();
-				}
-			} else if (data.type === 'ping') {
-				const eid = data.ping_event?.event_id;
-				socket.send(JSON.stringify({ type: 'pong', event_id: eid }));
+				break;
 			}
-		} catch (e) {}
+			case 'user_transcript': {
+				const text =
+					data.user_transcription_event?.user_transcript ??
+					data.user_transcript_event?.user_transcript;
+				if (text) {
+					lastUserAt = Date.now();
+					callbacks.onUserMessage?.(text);
+				}
+				break;
+			}
+			case 'audio': {
+				const base64 = data.audio_event?.audio_base_64;
+				if (base64) enqueuePcm(base64ToBytes(base64));
+				break;
+			}
+			case 'interruption': {
+				stopPlayback();
+				break;
+			}
+			case 'client_tool_call': {
+				const tool = data.client_tool_call;
+				if (tool?.tool_name === 'report_outcome') {
+					reportOutcome(tool.parameters?.outcome ?? '');
+				}
+				socket.send(
+					JSON.stringify({
+						type: 'client_tool_result',
+						tool_call_id: tool?.tool_call_id,
+						result: 'ok',
+						is_error: false
+					})
+				);
+				break;
+			}
+			case 'ping': {
+				socket.send(JSON.stringify({ type: 'pong', event_id: data.ping_event?.event_id }));
+				break;
+			}
+		}
 	};
 
 	socket.onerror = (err) => callbacks.onError?.(err);
-	socket.onclose = () => callbacks.onClose?.();
+	socket.onclose = () => {
+		clearInterval(silenceTimer);
+		callbacks.onClose?.();
+	};
 
 	const stop = () => {
+		clearInterval(silenceTimer);
+		clearTimeout(audioEndTimer);
+		stopPlayback();
 		try {
 			processor?.disconnect();
 		} catch {}
 		try {
-			if (audioCtx && audioCtx.state !== 'closed') {
-				void audioCtx.close().catch(() => {});
-			}
+			muteGain?.disconnect();
 		} catch {}
 		try {
-			if (audioPlayerCtx && audioPlayerCtx.state !== 'closed') {
-				void audioPlayerCtx.close().catch(() => {});
-			}
+			if (micCtx && micCtx.state !== 'closed') void micCtx.close().catch(() => {});
 		} catch {}
 		try {
 			micStream?.getTracks().forEach((t) => t.stop());
@@ -167,7 +318,7 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 
 	const sendText = (text: string) => {
 		if (socket.readyState === WebSocket.OPEN) {
-			socket.send(JSON.stringify({ type: 'user_transcript', user_transcript: text }));
+			socket.send(JSON.stringify({ type: 'user_message', text }));
 		}
 	};
 
