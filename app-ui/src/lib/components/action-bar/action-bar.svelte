@@ -39,10 +39,10 @@
 </script>
 
 <footer
-	class="app-actions fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/90 px-3 backdrop-blur-md"
+	class="app-actions fixed inset-x-0 bottom-0 z-50 border-t border-border bg-background/90 backdrop-blur-md"
 >
 	<div
-		class={cn('mx-auto flex w-full max-w-md items-center gap-2 py-2', className)}
+		class={cn('mx-auto flex w-full max-w-md items-center gap-2 px-3 py-2', className)}
 		data-slot="action-bar"
 	>
 		<Button
