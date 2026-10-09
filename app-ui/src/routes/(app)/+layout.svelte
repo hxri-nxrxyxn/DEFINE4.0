@@ -41,7 +41,7 @@
 	<header
 		class="app-bar fixed inset-x-0 top-0 z-50 border-b border-border bg-background/90 backdrop-blur-md"
 	>
-		<div class="mx-auto flex h-14 w-full max-w-md items-center gap-1 px-3">
+		<div class="mx-auto flex h-14 w-full max-w-md items-center gap-1 px-4 sm:px-6">
 			{#if showBack}
 				<Button
 					variant="ghost"
@@ -69,7 +69,7 @@
 		</div>
 	</header>
 
-	<main class="app-content mx-auto w-full max-w-md px-3">
+	<main class="app-content mx-auto w-full max-w-md px-4 sm:px-6">
 		{@render children()}
 	</main>
 
@@ -148,7 +148,7 @@
 
 <style>
 	.app-shell {
-		--gutter: 0.75rem;
+		--gutter: 1rem;
 		--bar-h: 3.5rem;
 		--action-h: 3.5rem;
 		--safe-top: env(safe-area-inset-top, 0px);

@@ -380,19 +380,19 @@
 	}
 </script>
 
-<div class="space-y-6 py-2">
-	<div class="space-y-1">
-		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Dashboard</h1>
-		<p class="text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
+<div class="space-y-5 sm:space-y-6 py-3">
+	<div class="space-y-1.5 px-0.5">
+		<h1 class="scroll-m-20 text-2xl sm:text-3xl font-extrabold tracking-tight">Dashboard</h1>
+		<p class="text-xs sm:text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
 	</div>
 
 	<!-- Live IVR Sensor / Auto-Dialer Control Card -->
 	{#if campaign.recipients.length > 0}
 		<Card.Root class="border-primary/30 bg-primary/[0.03] overflow-hidden shadow-xs">
-			<Card.Header class="pb-2.5">
+			<Card.Header class="p-3.5 sm:p-4 pb-2.5">
 				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						<div class="relative grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+					<div class="flex items-center gap-2.5">
+						<div class="relative grid size-8.5 place-items-center rounded-lg bg-primary/10 text-primary">
 							<PhoneCall class="size-4" />
 							{#if campaign.isCampaignRunning}
 								<span class="absolute -top-1 -right-1 flex size-2.5">
@@ -402,7 +402,7 @@
 							{/if}
 						</div>
 						<div>
-							<Card.Title class="text-base font-semibold">IVR Dialer</Card.Title>
+							<Card.Title class="text-sm sm:text-base font-semibold">IVR Dialer</Card.Title>
 							<Card.Description class="text-xs">
 								{campaign.isCampaignRunning ? 'Auto-dialing · 10s per call' : 'Idle'}
 							</Card.Description>
@@ -413,7 +413,7 @@
 						<Button
 							variant="outline"
 							size="icon-sm"
-							class="size-8 rounded-lg"
+							class="size-8.5 rounded-lg"
 							onclick={pauseResumeCampaign}
 							title={campaign.isCampaignRunning ? 'Pause campaign' : 'Resume campaign'}
 						>
@@ -427,7 +427,7 @@
 							<Button
 								variant="ghost"
 								size="icon-sm"
-								class="size-8 rounded-lg text-destructive hover:bg-destructive/10"
+								class="size-8.5 rounded-lg text-destructive hover:bg-destructive/10"
 								onclick={stopCampaignPrematurely}
 								title="Stop dialer"
 							>
@@ -438,16 +438,16 @@
 				</div>
 			</Card.Header>
 
-			<Card.Content class="space-y-3 pt-1">
-				<div class="grid grid-cols-3 gap-2 text-xs">
-					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+			<Card.Content class="p-3.5 sm:p-4 pt-0 space-y-3">
+				<div class="grid grid-cols-3 gap-2.5 text-xs">
+					<div class="rounded-lg border border-border bg-card/60 p-2.5 sm:p-3">
 						<div class="text-muted-foreground text-[11px]">Roster Progress</div>
-						<div class="font-semibold text-foreground mt-0.5 text-sm tabular-nums">
+						<div class="font-semibold text-foreground mt-0.5 text-xs sm:text-sm tabular-nums">
 							{Math.min(campaign.currentCallIndex + (campaign.isCampaignRunning ? 1 : 0), campaign.recipients.length)} / {campaign.recipients.length}
 						</div>
 					</div>
 
-					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+					<div class="rounded-lg border border-border bg-card/60 p-2.5 sm:p-3">
 						<div class="flex items-center justify-between text-muted-foreground text-[11px]">
 							<span>Active Target</span>
 							{#if campaign.hipaaCompliant}
@@ -461,7 +461,7 @@
 						</div>
 					</div>
 
-					<div class="rounded-lg border border-border bg-card/60 p-2.5">
+					<div class="rounded-lg border border-border bg-card/60 p-2.5 sm:p-3">
 						<div class="text-muted-foreground text-[11px]">Pickup Timer</div>
 						<div class="font-semibold text-primary mt-0.5 text-xs tabular-nums">
 							{#if campaign.currentCallStatus === 'connected'}
@@ -477,7 +477,7 @@
 
 				<!-- Personalized Preview snippet -->
 				{#if campaign.isCampaignRunning && campaign.currentCallName}
-					<div class="rounded-lg border border-border/80 bg-muted/30 p-2.5 text-xs space-y-1">
+					<div class="rounded-lg border border-border/80 bg-muted/30 p-2.5 sm:p-3 text-xs space-y-1">
 						<div class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
 							Active personalized script:
 						</div>
@@ -490,81 +490,84 @@
 		</Card.Root>
 	{/if}
 
-	<div class="grid grid-cols-3 gap-3">
+	<!-- Metric Stat Cards -->
+	<div class="grid grid-cols-3 gap-2.5 sm:gap-3">
 		{#each stats as stat (stat.label)}
-			<Card.Root class="gap-0">
-				<Card.Content class="space-y-1 px-4 py-5">
-					<p class="text-xs text-muted-foreground">{stat.label}</p>
-					<p class="text-2xl font-semibold tabular-nums">{stat.value}</p>
+			<Card.Root class="gap-0 shadow-xs">
+				<Card.Content class="space-y-1 p-3 sm:px-4 sm:py-4">
+					<p class="text-[11px] sm:text-xs text-muted-foreground truncate">{stat.label}</p>
+					<p class="text-lg sm:text-2xl font-semibold tabular-nums">{stat.value}</p>
 				</Card.Content>
 			</Card.Root>
 		{/each}
-		<Card.Root class="gap-0">
-			<Card.Content class="space-y-1 px-4 py-5">
-				<p class="text-xs text-muted-foreground">Connect rate</p>
-				<p class="text-2xl font-semibold tabular-nums">{connectRatePct}%</p>
+		<Card.Root class="gap-0 shadow-xs">
+			<Card.Content class="space-y-1 p-3 sm:px-4 sm:py-4">
+				<p class="text-[11px] sm:text-xs text-muted-foreground truncate">Connect rate</p>
+				<p class="text-lg sm:text-2xl font-semibold tabular-nums">{connectRatePct}%</p>
 			</Card.Content>
 		</Card.Root>
 	</div>
 
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="text-base">Calls by language</Card.Title>
-			<Card.Description>Volume across regional languages.</Card.Description>
+	<!-- Language Breakdown Card -->
+	<Card.Root class="shadow-xs">
+		<Card.Header class="p-4 sm:p-5 pb-2">
+			<Card.Title class="text-sm sm:text-base font-semibold">Calls by language</Card.Title>
+			<Card.Description class="text-xs">Volume across regional languages.</Card.Description>
 		</Card.Header>
-		<Card.Content class="space-y-3">
-			<Chart.Container config={languageConfig} class="mx-auto h-52 w-full">
-				<PieChart data={languageData} value="value" c="color" innerRadius={62}>
+		<Card.Content class="p-4 sm:p-5 pt-1 space-y-3">
+			<Chart.Container config={languageConfig} class="mx-auto h-48 sm:h-52 w-full">
+				<PieChart data={languageData} value="value" c="color" innerRadius={58}>
 					{#snippet tooltip()}
 						<Chart.Tooltip />
 					{/snippet}
 				</PieChart>
 			</Chart.Container>
-			<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+			<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs pt-1">
 				{#each languageData as item (item.label)}
 					<div class="flex items-center gap-2">
 						<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {item.color}"></span>
 						<span class="text-muted-foreground">{item.label}</span>
-						<span class="ml-auto tabular-nums">{item.value}</span>
+						<span class="ml-auto tabular-nums font-mono">{item.value}</span>
 					</div>
 				{/each}
 			</div>
 		</Card.Content>
 	</Card.Root>
 
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="text-base">Call history</Card.Title>
-			<Card.Description>People contacted this session and how it went.</Card.Description>
+	<!-- Call History Card -->
+	<Card.Root class="shadow-xs overflow-hidden">
+		<Card.Header class="p-4 sm:p-5 pb-2">
+			<Card.Title class="text-sm sm:text-base font-semibold">Call history</Card.Title>
+			<Card.Description class="text-xs">People contacted this session and how it went.</Card.Description>
 		</Card.Header>
-		<Card.Content class="px-0">
+		<Card.Content class="p-0">
 			{#if callHistory.length > 0}
 				<Table.Root>
-					<Table.Header>
-						<Table.Row>
-							<Table.Head>Contact</Table.Head>
-							<Table.Head class="text-right">Language</Table.Head>
-							<Table.Head class="text-right">Status</Table.Head>
+					<Table.Header class="bg-muted/30">
+						<Table.Row class="border-b border-border/60">
+							<Table.Head class="px-4 py-2.5 text-xs">Contact</Table.Head>
+							<Table.Head class="px-3 py-2.5 text-right text-xs">Language</Table.Head>
+							<Table.Head class="px-4 py-2.5 text-right text-xs">Status</Table.Head>
 						</Table.Row>
 					</Table.Header>
-					<Table.Body>
+					<Table.Body class="divide-y divide-border/30">
 						{#each callHistory as entry (entry.recipient.phone)}
-							<Table.Row>
-								<Table.Cell>
-									<div class="font-medium text-foreground">{entry.recipient.name}</div>
-									<div class="text-[11px] font-mono text-muted-foreground">
+							<Table.Row class="hover:bg-muted/20 transition-colors">
+								<Table.Cell class="px-4 py-3">
+									<div class="font-medium text-foreground text-xs">{entry.recipient.name}</div>
+									<div class="text-[11px] font-mono text-muted-foreground mt-0.5">
 										{campaign.hipaaCompliant ? entry.recipient.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : entry.recipient.phone}
 										{#if entry.outcome}
 											· {formatTime(entry.outcome.at)}
 										{/if}
 									</div>
 								</Table.Cell>
-								<Table.Cell class="text-right text-xs text-muted-foreground">
+								<Table.Cell class="px-3 py-3 text-right text-xs text-muted-foreground">
 									{entry.recipient.language || '—'}
 								</Table.Cell>
-								<Table.Cell class="text-right">
+								<Table.Cell class="px-4 py-3 text-right">
 									<span
-										class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium {OUTCOME_META[
+										class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium {OUTCOME_META[
 											entry.outcome?.disposition ?? ''
 										]?.class ?? ''}"
 									>
@@ -584,11 +587,12 @@
 		</Card.Content>
 	</Card.Root>
 
-	<Card.Root>
-		<Card.Header>
+	<!-- Non-Responders Card -->
+	<Card.Root class="shadow-xs">
+		<Card.Header class="p-4 sm:p-5 pb-2">
 			<div class="flex items-center justify-between">
 				<div>
-					<Card.Title class="text-base font-semibold">Non-Responders</Card.Title>
+					<Card.Title class="text-sm sm:text-base font-semibold">Non-Responders</Card.Title>
 					<Card.Description class="text-xs">
 						Contacts who declined, timed out, or did not answer.
 					</Card.Description>
@@ -600,17 +604,17 @@
 				{/if}
 			</div>
 		</Card.Header>
-		<Card.Content class="space-y-2.5">
+		<Card.Content class="p-4 sm:p-5 pt-1 space-y-2.5">
 			{#if retries.length > 0}
 				{#each retries as item (item.phone)}
-					<div class="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 text-xs">
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 sm:p-3 text-xs">
 						<div class="flex items-center gap-2.5 min-w-0">
-							<div class="grid size-7 place-items-center rounded-md bg-muted text-muted-foreground shrink-0">
+							<div class="grid size-7.5 place-items-center rounded-md bg-muted text-muted-foreground shrink-0">
 								<PhoneMissed class="size-3.5 text-rose-500" />
 							</div>
 							<div class="min-w-0 truncate">
-								<div class="font-medium text-foreground truncate">{item.name}</div>
-								<div class="text-[11px] font-mono text-muted-foreground truncate">
+								<div class="font-medium text-foreground truncate text-xs">{item.name}</div>
+								<div class="text-[11px] font-mono text-muted-foreground truncate mt-0.5">
 									{campaign.hipaaCompliant ? item.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : item.phone} · {item.language}
 								</div>
 							</div>
