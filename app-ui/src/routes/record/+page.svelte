@@ -24,6 +24,24 @@
 	const contactLanguage = contact?.language || 'English';
 	const contactPhone = contact?.phone || '';
 
+	// Guard against a stale draft that captured the agent's own closing line
+	// (older builds wrote agent replies into templateText, which then became
+	// the next call's first message).
+	function cleanScript(text: string): string {
+		const t = text.trim();
+		if (!t) return '';
+		const looksLikeFarewell =
+			t.length < 80 &&
+			/(goodbye|\bbye\b|thank you for your time|thanks for your time|have a (great|good|nice) day)/i.test(
+				t
+			);
+		if (looksLikeFarewell) {
+			campaign.templateText = '';
+			return '';
+		}
+		return t;
+	}
+
 	let status = $state<Status>('requesting');
 	let level = $state(0);
 	let liveTranscript = $state('');
@@ -52,7 +70,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					script: campaign.templateText,
+					script: cleanScript(campaign.templateText),
 					name: contactName,
 					language: contactLanguage
 				})
@@ -110,14 +128,26 @@
 	function finalize(o: string) {
 		if (disposed) return;
 		disposed = true;
-		convSession?.stop();
-		if (contactPhone) {
-			campaign.recordOutcome(contactPhone, o as OutcomeDisposition, agentResponseText || liveTranscript);
-		}
-		toast.success(`Call ended — ${OUTCOME_LABEL[o] ?? o}`);
 		status = 'done';
 		outcome = o;
+		try {
+			convSession?.stop();
+		} catch {}
+		if (contactPhone) {
+			try {
+				campaign.recordOutcome(contactPhone, o as OutcomeDisposition, agentResponseText || liveTranscript);
+			} catch {}
+		}
+		toast.success(`Call ended — ${OUTCOME_LABEL[o] ?? o}`);
 		setTimeout(() => void goto('/dashboard'), 1600);
+	}
+
+	function exit(target: string) {
+		disposed = true;
+		try {
+			convSession?.stop();
+		} catch {}
+		void goto(target);
 	}
 
 	function stop() {
@@ -126,10 +156,7 @@
 	}
 
 	function cancel() {
-		if (disposed) return;
-		disposed = true;
-		convSession?.stop();
-		void goto('/template');
+		exit('/template');
 	}
 </script>
 

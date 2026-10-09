@@ -37,6 +37,16 @@ function buildFirstMessage(script: string): string {
 	return 'Hello {{name}}, this is DEFINE Voice AI calling with an important update. Do you have a moment?';
 }
 
+// Never let a stray closing line (e.g. a polluted draft) become the greeting.
+function sanitizeScript(script: string): string {
+	const t = script.trim();
+	if (!t) return '';
+	const looksLikeFarewell =
+		t.length < 120 &&
+		/(goodbye|\bbye\b|thank you for your time|thanks for your time|have a (great|good|nice) day)/i.test(t);
+	return looksLikeFarewell ? '' : t;
+}
+
 function buildPrompt(script: string): string {
 	const context = script.trim()
 		? `Deliver this campaign message naturally in the recipient's own language: "${script.trim()}"`
@@ -58,7 +68,7 @@ function buildPrompt(script: string): string {
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = await request.json().catch(() => ({}));
-	const script: string = typeof body.script === 'string' ? body.script : '';
+	const script: string = sanitizeScript(typeof body.script === 'string' ? body.script : '');
 	const name: string = (typeof body.name === 'string' && body.name.trim()) || 'there';
 	const language: string = typeof body.language === 'string' ? body.language.trim().toLowerCase() : '';
 
