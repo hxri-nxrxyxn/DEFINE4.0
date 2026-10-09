@@ -5,6 +5,7 @@
 	import { ActionBar } from '#lib/components/action-bar/index.js';
 	import * as Chart from '#lib/components/ui/chart/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Table from '#lib/components/ui/table/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
 	import { apiUrl } from '#lib/config.js';
@@ -97,6 +98,26 @@
 				}))
 			: []
 	);
+
+	const OUTCOME_META: Record<string, { label: string; class: string }> = {
+		confirmed: { label: 'Confirmed', class: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+		declined: { label: 'Declined', class: 'bg-rose-500/15 text-rose-600 dark:text-rose-400' },
+		not_available: { label: 'Not available', class: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
+		opt_out: { label: 'Opted out', class: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400' },
+		no_response: { label: 'No response', class: 'bg-muted text-muted-foreground' }
+	};
+
+	// Recipients who have been called this session, most recent first.
+	const callHistory = $derived.by(() =>
+		campaign.recipients
+			.map((recipient) => ({ recipient, outcome: campaign.outcomes[recipient.phone] }))
+			.filter((entry) => entry.outcome !== undefined)
+			.sort((a, b) => (b.outcome?.at ?? 0) - (a.outcome?.at ?? 0))
+	);
+
+	function formatTime(ts: number): string {
+		return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
 
 	// Automated Roster Campaign Execution Loop
 	let loopTimer: any = null;
@@ -463,6 +484,58 @@
 					</div>
 				{/each}
 			</div>
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Call history</Card.Title>
+			<Card.Description>People contacted this session and how it went.</Card.Description>
+		</Card.Header>
+		<Card.Content class="px-0">
+			{#if callHistory.length > 0}
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head>Contact</Table.Head>
+							<Table.Head class="text-right">Language</Table.Head>
+							<Table.Head class="text-right">Status</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each callHistory as entry (entry.recipient.phone)}
+							<Table.Row>
+								<Table.Cell>
+									<div class="font-medium text-foreground">{entry.recipient.name}</div>
+									<div class="text-[11px] font-mono text-muted-foreground">
+										{entry.recipient.phone}
+										{#if entry.outcome}
+											· {formatTime(entry.outcome.at)}
+										{/if}
+									</div>
+								</Table.Cell>
+								<Table.Cell class="text-right text-xs text-muted-foreground">
+									{entry.recipient.language || '—'}
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									<span
+										class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium {OUTCOME_META[
+											entry.outcome?.disposition ?? ''
+										]?.class ?? ''}"
+									>
+										{OUTCOME_META[entry.outcome?.disposition ?? '']?.label ??
+											entry.outcome?.disposition}
+									</span>
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			{:else}
+				<div class="px-6 py-8 text-center text-xs text-muted-foreground">
+					No calls yet. Contact a recipient to see them here.
+				</div>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 
