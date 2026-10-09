@@ -45,7 +45,7 @@
 	}
 </script>
 
-<section class="space-y-4 py-2">
+<section class="space-y-3 py-1">
 	<div class="space-y-1">
 		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Preview</h1>
 		<p class="text-sm text-muted-foreground">
@@ -53,11 +53,11 @@
 		</p>
 	</div>
 
-	<Card.Root class="w-full border-border shadow-xs">
-		<Card.Content class="space-y-4 px-5 py-5">
+	<Card.Root class="w-full border-border shadow-xs py-0">
+		<Card.Content class="space-y-2.5 px-4 pt-3 pb-4">
 			<div class="flex items-center gap-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-				<span class="grid size-7 place-items-center rounded-full bg-primary/10 text-primary">
-					<Phone class="size-3.5" />
+				<span class="grid size-6 place-items-center rounded-full bg-primary/10 text-primary">
+					<Phone class="size-3" />
 				</span>
 				Call script
 			</div>

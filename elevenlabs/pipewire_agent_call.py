@@ -52,7 +52,7 @@ WHITE = "\033[97m"
 BG_BLUE = "\033[44m"
 BG_GREEN = "\033[42m"
 BG_RED = "\033[41m"
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(BASE_DIR, ".env")
 CRED_FILE = os.path.join(BASE_DIR, "cred.txt")
 

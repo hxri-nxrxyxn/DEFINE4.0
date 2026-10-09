@@ -25,3 +25,5 @@ malayalam-stuff/
 .DS_Store
 Thumbs.db
 .vscode/
+.idea/
+**/.idea/
