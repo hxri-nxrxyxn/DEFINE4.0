@@ -134,6 +134,14 @@
 		}
 	}
 
+	function go(path: string) {
+		try {
+			void goto(path);
+		} catch {
+			if (typeof window !== 'undefined') window.location.href = path;
+		}
+	}
+
 	// Assistant mode: the agent handed us the composed script.
 	function handleScript(script: string) {
 		if (disposed) return;
@@ -146,7 +154,7 @@
 			convSession?.stop();
 		} catch {}
 		toast.success('Script ready', { description: s });
-		setTimeout(() => void goto('/preview'), 1500);
+		setTimeout(() => go('/preview'), 700);
 	}
 
 	function handleOutcome(o: string) {
@@ -156,7 +164,7 @@
 		// Let the agent finish its goodbye before hanging up.
 		setTimeout(() => {
 			if (!disposed) finalize(o);
-		}, 2500);
+		}, 2000);
 	}
 
 	function finalize(o: string) {
@@ -173,7 +181,7 @@
 			} catch {}
 		}
 		toast.success(`Call ended — ${OUTCOME_LABEL[o] ?? o}`);
-		setTimeout(() => void goto('/dashboard'), 1600);
+		setTimeout(() => go('/dashboard'), 900);
 	}
 
 	function exit(target: string) {
@@ -285,7 +293,7 @@
 				variant="outline"
 				size="sm"
 				class="rounded-xl px-4"
-				onclick={() => goto(callMode ? '/dashboard' : '/preview')}
+				onclick={() => go(callMode ? '/dashboard' : '/preview')}
 			>
 				{callMode ? 'View dashboard' : 'Preview'}
 			</Button>

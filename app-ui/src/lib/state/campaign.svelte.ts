@@ -1,5 +1,6 @@
 import { browser } from '$app/env';
 import type { Recipient } from '#lib/csv.js';
+import { publishCall, publishCampaign, newCampaignId } from '#lib/firebase.js';
 
 const STORAGE_KEY = 'campaign-draft';
 
@@ -36,6 +37,7 @@ type PersistedState = {
 	outcomes: Record<string, CallOutcome>;
 	activePhone: string;
 	hipaaCompliant?: boolean;
+	campaignId: string;
 };
 
 const DEFAULTS: PersistedState = {
@@ -46,7 +48,8 @@ const DEFAULTS: PersistedState = {
 	recipients: [],
 	outcomes: {},
 	activePhone: '',
-	hipaaCompliant: false
+	hipaaCompliant: false,
+	campaignId: ''
 };
 
 function read(): PersistedState {
@@ -85,6 +88,8 @@ class CampaignStore {
 	outcomes = $state<Record<string, CallOutcome>>({});
 	/** Phone of the recipient currently being called. */
 	activePhone = $state('');
+	/** Stable id for this campaign used as the Firebase RTDB key. */
+	campaignId = $state('');
 
 	csvUploaded = $derived(this.recipients.length > 0);
 
@@ -139,6 +144,7 @@ class CampaignStore {
 		this.outcomes = saved.outcomes ?? {};
 		this.activePhone = saved.activePhone ?? '';
 		this.hipaaCompliant = Boolean(saved.hipaaCompliant);
+		this.campaignId = saved.campaignId || newCampaignId();
 
 		$effect.root(() => {
 			$effect(() => {
@@ -152,6 +158,7 @@ class CampaignStore {
 				void this.outcomes;
 				void this.activePhone;
 				void this.hipaaCompliant;
+				void this.campaignId;
 				this.#scheduleSave();
 			});
 		});
@@ -168,7 +175,8 @@ class CampaignStore {
 				recipients: $state.snapshot(this.recipients),
 				outcomes: $state.snapshot(this.outcomes),
 				activePhone: this.activePhone,
-				hipaaCompliant: this.hipaaCompliant
+				hipaaCompliant: this.hipaaCompliant,
+				campaignId: this.campaignId
 			};
 			try {
 				sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -181,6 +189,11 @@ class CampaignStore {
 	setRecipients(name: string, recipients: Recipient[]) {
 		this.csvName = name;
 		this.recipients = recipients;
+		void publishCampaign(
+			this.campaignId,
+			{ name, script: this.templateText, domain: 'events', createdAt: Date.now() },
+			recipients
+		);
 	}
 
 	clearRecipients() {
@@ -205,6 +218,20 @@ class CampaignStore {
 				transcript
 			}
 		};
+
+		const r = this.recipients.find((x) => x.phone === phone);
+		void publishCall(this.campaignId, {
+			name: r?.name ?? 'Recipient',
+			phone: phone.replace(/^\+91\s*/, ''),
+			language: r?.language ?? 'English',
+			segment: r?.segment ?? 'General',
+			disposition,
+			attempts: this.outcomes[phone].attempts,
+			durationSec: 0,
+			ts: Date.now(),
+			transcript,
+			campaign: this.csvName || 'Campaign'
+		});
 	}
 
 	reset() {

@@ -8,6 +8,7 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
+	import { subscribeCalls, seedDemo, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
 	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
@@ -26,6 +27,101 @@
 	import { toast } from 'svelte-sonner';
 
 	let loading = $state(true);
+
+	// === Live Firebase RTDB analytics ===
+	type LiveCall = CallRecord & { id?: string };
+	let liveCalls = $state<LiveCall[]>([]);
+	let unsubCalls: (() => void) | undefined;
+
+	const DISP_META: Record<string, { label: string; color: string }> = {
+		confirmed: { label: 'Confirmed', color: 'var(--chart-1)' },
+		declined: { label: 'Declined', color: 'var(--chart-4)' },
+		not_available: { label: 'Not available', color: 'var(--chart-3)' },
+		opt_out: { label: 'Opted out', color: 'var(--chart-5)' },
+		no_response: { label: 'No response', color: 'var(--chart-2)' }
+	};
+
+	const SAMPLE_RECIPIENTS = [
+		{ name: 'Ananya Sharma', phone: '9821000210', language: 'Hindi', segment: 'Parent' },
+		{ name: 'Karthik Iyer', phone: '9945001845', language: 'Tamil', segment: 'Alumni' },
+		{ name: 'Meera Nair', phone: '9744004019', language: 'Malayalam', segment: 'Parent' },
+		{ name: 'Rohan Gupta', phone: '9611000733', language: 'Marathi', segment: 'Student' },
+		{ name: 'Sneha Reddy', phone: '9849002901', language: 'Telugu', segment: 'Parent' },
+		{ name: 'Arjun Das', phone: '9836001188', language: 'Bengali', segment: 'Alumni' },
+		{ name: 'Priya Menon', phone: '9739003344', language: 'Malayalam', segment: 'Staff' },
+		{ name: 'Vikram Singh', phone: '9811005522', language: 'Hindi', segment: 'Parent' },
+		{ name: 'Divya Rao', phone: '9900006677', language: 'Kannada', segment: 'Student' },
+		{ name: 'Naveen Kumar', phone: '9959008899', language: 'Tamil', segment: 'Parent' },
+		{ name: 'Fatima Sheikh', phone: '9845001234', language: 'Hindi', segment: 'Alumni' },
+		{ name: 'Ishaan Patel', phone: '9727004567', language: 'Marathi', segment: 'Staff' }
+	];
+
+	const liveTotal = $derived(liveCalls.length);
+	const liveConfirmed = $derived(liveCalls.filter((c) => c.disposition === 'confirmed').length);
+	const liveRetryable = $derived(
+		liveCalls.filter((c) => c.disposition === 'no_response' || c.disposition === 'not_available').length
+	);
+	const liveConfirmedRate = $derived(
+		liveTotal ? Math.round((liveConfirmed / liveTotal) * 100) : 0
+	);
+
+	const liveDispData = $derived.by(() => {
+		const m = new Map<string, number>();
+		for (const c of liveCalls) m.set(c.disposition, (m.get(c.disposition) ?? 0) + 1);
+		return [...m.entries()].map(([k, v]) => ({
+			key: k,
+			label: DISP_META[k]?.label ?? k,
+			value: v,
+			color: DISP_META[k]?.color ?? 'var(--muted)'
+		}));
+	});
+
+	const liveLangData = $derived.by(() => {
+		const m = new Map<string, number>();
+		for (const c of liveCalls) {
+			const k = c.language || 'Unknown';
+			m.set(k, (m.get(k) ?? 0) + 1);
+		}
+		return [...m.entries()].map(([label, value], i) => ({
+			key: label.toLowerCase(),
+			label,
+			value,
+			color: COLORS[i % COLORS.length]
+		}));
+	});
+
+	const liveSegData = $derived.by(() => {
+		const m = new Map<string, number>();
+		for (const c of liveCalls) {
+			const k = c.segment || 'General';
+			m.set(k, (m.get(k) ?? 0) + 1);
+		}
+		const total = Math.max(1, liveCalls.length);
+		return [...m.entries()]
+			.sort((a, b) => b[1] - a[1])
+			.map(([label, value]) => ({ label, value, pct: Math.round((value / total) * 100) }));
+	});
+
+	async function seedFirebase() {
+		const recs = campaign.recipients.length ? campaign.recipients : SAMPLE_RECIPIENTS;
+		await seedDemo(
+			campaign.campaignId,
+			recs.map((r) => ({
+				name: r.name,
+				phone: r.phone,
+				language: r.language || 'Hindi',
+				segment: r.segment || 'General'
+			})),
+			campaign.templateText || 'Hello {name}, this is a reminder about the upcoming event.',
+			campaign.csvName || 'DEFINE Demo Campaign'
+		);
+		toast.success('Seeded demo data to Firebase');
+	}
+
+	async function clearFirebase() {
+		await clearCalls(campaign.campaignId);
+		toast.info('Cleared Firebase call data');
+	}
 	let retrying = $state(false);
 
 	let fetchedStats = $state([
@@ -253,7 +349,8 @@
 					disposition = 'no_response';
 				}
 
-				// Record in campaign store outcomes for analytical tracking & non-responder list
+				// Record in campaign store outcomes for analytical tracking,
+				// non-responder list, and Firebase publishing.
 				campaign.recordOutcome(current.phone, disposition);
 
 				if (campaign.callLogs[0]) {
@@ -343,10 +440,15 @@
 		loadAnalytics();
 		// Poll loop every 800ms
 		loopTimer = setInterval(runAutoDialerLoop, 800);
+		// Live data from Firebase RTDB
+		unsubCalls = subscribeCalls(campaign.campaignId, (c) => {
+			liveCalls = c;
+		});
 	});
 
 	onDestroy(() => {
 		if (loopTimer) clearInterval(loopTimer);
+		unsubCalls?.();
 	});
 
 	async function retryAll() {
@@ -385,6 +487,146 @@
 		<h1 class="scroll-m-20 text-2xl sm:text-3xl font-extrabold tracking-tight">Dashboard</h1>
 		<p class="text-xs sm:text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
 	</div>
+
+	<!-- Live Firebase RTDB Analytics -->
+	<Card.Root class="border-primary/30 bg-primary/[0.03]">
+		<Card.Header>
+			<div class="flex items-center justify-between">
+				<div>
+					<Card.Title class="text-base">Live Campaign Analytics</Card.Title>
+					<Card.Description>Realtime from Firebase · {liveTotal} calls</Card.Description>
+				</div>
+				<div class="flex items-center gap-1.5">
+					<Button variant="outline" size="sm" class="rounded-lg h-8 text-xs" onclick={seedFirebase}>
+						Seed demo
+					</Button>
+					<Button variant="ghost" size="sm" class="rounded-lg h-8 text-xs" onclick={clearFirebase}>
+						Clear
+					</Button>
+				</div>
+			</div>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<div class="grid grid-cols-3 gap-3">
+				<Card.Root class="gap-0 border-border/60">
+					<Card.Content class="space-y-1 px-3 py-4">
+						<p class="text-xs text-muted-foreground">Total calls</p>
+						<p class="text-2xl font-semibold tabular-nums">{liveTotal}</p>
+					</Card.Content>
+				</Card.Root>
+				<Card.Root class="gap-0 border-border/60">
+					<Card.Content class="space-y-1 px-3 py-4">
+						<p class="text-xs text-muted-foreground">Confirm rate</p>
+						<p class="text-2xl font-semibold tabular-nums text-emerald-500">{liveConfirmedRate}%</p>
+					</Card.Content>
+				</Card.Root>
+				<Card.Root class="gap-0 border-border/60">
+					<Card.Content class="space-y-1 px-3 py-4">
+						<p class="text-xs text-muted-foreground">Retryable</p>
+						<p class="text-2xl font-semibold tabular-nums text-amber-500">{liveRetryable}</p>
+					</Card.Content>
+				</Card.Root>
+			</div>
+
+			{#if liveTotal > 0}
+				<div class="grid gap-4 sm:grid-cols-2">
+					<div>
+						<p class="mb-1 text-xs font-medium text-muted-foreground">Outcomes</p>
+						<Chart.Container config={languageConfig} class="mx-auto h-44 w-full">
+							<PieChart data={liveDispData} value="value" c="color" innerRadius={44}>
+								{#snippet tooltip()}<Chart.Tooltip />{/snippet}
+							</PieChart>
+						</Chart.Container>
+						<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+							{#each liveDispData as d (d.key)}
+								<div class="flex items-center gap-2">
+									<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {d.color}"></span>
+									<span class="truncate text-muted-foreground">{d.label}</span>
+									<span class="ml-auto tabular-nums">{d.value}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+					<div>
+						<p class="mb-1 text-xs font-medium text-muted-foreground">By language</p>
+						<Chart.Container config={languageConfig} class="mx-auto h-44 w-full">
+							<PieChart data={liveLangData} value="value" c="color" innerRadius={44}>
+								{#snippet tooltip()}<Chart.Tooltip />{/snippet}
+							</PieChart>
+						</Chart.Container>
+						<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+							{#each liveLangData as d (d.key)}
+								<div class="flex items-center gap-2">
+									<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {d.color}"></span>
+									<span class="truncate text-muted-foreground">{d.label}</span>
+									<span class="ml-auto tabular-nums">{d.value}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-2 text-xs font-medium text-muted-foreground">By audience segment</p>
+					<div class="space-y-2">
+						{#each liveSegData as s (s.label)}
+							<div class="space-y-1">
+								<div class="flex items-center justify-between text-xs">
+									<span class="text-foreground">{s.label}</span>
+									<span class="tabular-nums text-muted-foreground">{s.value} · {s.pct}%</span>
+								</div>
+								<div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+									<div class="h-full rounded-full bg-primary" style="width: {s.pct}%"></div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<div class="overflow-hidden rounded-lg border border-border">
+					<div class="max-h-64 overflow-y-auto">
+						<Table.Root>
+							<Table.Header class="sticky top-0 bg-muted/50">
+								<Table.Row>
+									<Table.Head>Contact</Table.Head>
+									<Table.Head class="text-right">Language</Table.Head>
+									<Table.Head class="text-right">Outcome</Table.Head>
+								</Table.Row>
+							</Table.Header>
+							<Table.Body>
+								{#each [...liveCalls].reverse() as c (c.id)}
+									<Table.Row>
+										<Table.Cell>
+											<div class="font-medium text-foreground">{c.name}</div>
+											<div class="text-[11px] font-mono text-muted-foreground">
+												{c.phone} · {c.segment}
+											</div>
+										</Table.Cell>
+										<Table.Cell class="text-right text-xs text-muted-foreground">
+											{c.language}
+										</Table.Cell>
+										<Table.Cell class="text-right">
+											<span
+												class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium {OUTCOME_META[
+													c.disposition
+												]?.class ?? 'bg-muted text-muted-foreground'}"
+											>
+												{OUTCOME_META[c.disposition]?.label ?? c.disposition}
+											</span>
+										</Table.Cell>
+									</Table.Row>
+								{/each}
+							</Table.Body>
+						</Table.Root>
+					</div>
+				</div>
+			{:else}
+				<div class="py-6 text-center text-xs text-muted-foreground">
+					No live calls yet. Tap “Seed demo” to populate Firebase, or place calls to see them stream here.
+				</div>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 	<!-- Live IVR Sensor / Auto-Dialer Control Card -->
 	{#if campaign.recipients.length > 0}
