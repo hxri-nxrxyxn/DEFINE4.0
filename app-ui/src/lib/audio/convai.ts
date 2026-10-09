@@ -18,6 +18,12 @@ export type ConvAISessionOptions = {
 	language?: string;
 	/** Milliseconds of mutual silence before the call is treated as "no response". */
 	silenceTimeoutMs?: number;
+	/**
+	 * Allow the user to interrupt the agent mid-sentence. Defaults to false
+	 * (half-duplex) because speaker echo otherwise triggers false interruptions
+	 * that chop the agent's sentences.
+	 */
+	bargeIn?: boolean;
 };
 
 export type ConvAISession = {
@@ -74,6 +80,7 @@ export async function startConvAISession(
 	options: ConvAISessionOptions = {}
 ): Promise<ConvAISession> {
 	const silenceTimeoutMs = options.silenceTimeoutMs ?? 15000;
+	const bargeIn = options.bargeIn ?? false;
 
 	// 1. Get signed URL from backend or bridge
 	let signed_url = '';
@@ -119,6 +126,10 @@ export async function startConvAISession(
 	let lastScheduled: AudioBufferSourceNode | null = null;
 	let audioEndTimer: ReturnType<typeof setTimeout> | undefined;
 	const activeSources = new Set<AudioBufferSourceNode>();
+	// True while the agent's audio is playing (plus a short tail). Used to gate
+	// the microphone so the agent doesn't hear itself and interrupt.
+	let agentSpeaking = false;
+	let lastAgentAudioAt = 0;
 
 	// --- Outcome detection ---
 	let outcomeReported = false;
@@ -155,6 +166,8 @@ export async function startConvAISession(
 		const ctx = getPlayerCtx();
 		if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
 		clearTimeout(audioEndTimer);
+		agentSpeaking = true;
+		lastAgentAudioAt = Date.now();
 
 		const sampleCount = Math.floor(bytes.byteLength / 2);
 		if (sampleCount === 0) return;
@@ -180,8 +193,11 @@ export async function startConvAISession(
 			activeSources.delete(source);
 			if (source === lastScheduled && activeSources.size === 0) {
 				audioEndTimer = setTimeout(() => {
-					if (activeSources.size === 0) callbacks.onAudioEnd?.();
-				}, 300);
+					if (activeSources.size === 0) {
+						agentSpeaking = false;
+						callbacks.onAudioEnd?.();
+					}
+				}, 500);
 			}
 		};
 		callbacks.onAudioPlay?.();
@@ -194,7 +210,9 @@ export async function startConvAISession(
 			lastUserAt = Date.now();
 			return;
 		}
-		if (Date.now() - lastUserAt > silenceTimeoutMs) reportOutcome('no_response');
+		// Safety: clear the speaking flag if audio was force-stopped.
+		if (agentSpeaking && Date.now() - lastAgentAudioAt > 900) agentSpeaking = false;
+		if (!agentSpeaking && Date.now() - lastUserAt > silenceTimeoutMs) reportOutcome('no_response');
 	}, 1000);
 
 	const dynamicVariables: Record<string, string> = {};
@@ -235,6 +253,14 @@ export async function startConvAISession(
 
 			processor.onaudioprocess = (evt) => {
 				if (socket.readyState !== WebSocket.OPEN) return;
+
+				// Half-duplex: stay silent while the agent talks so speaker echo
+				// can't be mistaken for a barge-in (which chops the agent's speech).
+				if (!bargeIn && agentSpeaking) {
+					callbacks.onLevel?.(0);
+					return;
+				}
+
 				const input = evt.inputBuffer.getChannelData(0);
 
 				let sum = 0;
