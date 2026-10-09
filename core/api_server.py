@@ -17,6 +17,7 @@ Usage:
 import os
 import sys
 import json
+import uuid
 import argparse
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -28,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.orchestrator import platform
 from core.analytics import analytics_engine
 from core.data_governance import consent_audit_ledger, erasure_audit_ledger, execute_right_to_erasure
+from core.elevenlabs_voice import synthesize_prompt_audio, get_exoml_response
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -299,6 +301,9 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Max-Age", "86400")
         self.end_headers()
 
+    def do_HEAD(self):
+        self.do_GET()
+
     def do_GET(self):
         path = self.path.split("?")[0]
 
@@ -339,13 +344,33 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
                 "erasure_ledger": erasure_audit_ledger[-10:]
             })
 
+        elif path.startswith("/audio/"):
+            filename = os.path.basename(path)
+            file_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audio_cache", filename)
+            if os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    data = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_error(404, "Audio file not found")
+
         elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
-            xml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="woman">Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs. Press 1 to confirm your attendance, press 2 to reschedule, or press 9 to opt out.</Say>
-    <Gather action="/api/calls/webhook/intent" method="POST" numDigits="1" timeout="10">
-    </Gather>
-</Response>"""
+            # Check for call_id in query params
+            query = self.path.split("?")[1] if "?" in self.path else ""
+            call_id = ""
+            for q in query.split("&"):
+                if q.startswith("call_id="):
+                    call_id = q.split("=")[1]
+            
+            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
+            audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
+            
+            xml_content = get_exoml_response(audio_url, "Hello! This is an outbound campaign call from DEFINE Voice AI.")
             data = xml_content.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/xml; charset=utf-8")
@@ -402,12 +427,16 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             })
 
         elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
-            xml_content = """<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Say voice="woman">Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs. Press 1 to confirm your attendance, press 2 to reschedule, or press 9 to opt out.</Say>
-    <Gather action="/api/calls/webhook/intent" method="POST" numDigits="1" timeout="10">
-    </Gather>
-</Response>"""
+            query = self.path.split("?")[1] if "?" in self.path else ""
+            call_id = ""
+            for q in query.split("&"):
+                if q.startswith("call_id="):
+                    call_id = q.split("=")[1]
+            
+            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
+            audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
+            
+            xml_content = get_exoml_response(audio_url, "Hello! This is an outbound campaign call from DEFINE Voice AI.")
             data = xml_content.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/xml; charset=utf-8")
@@ -421,19 +450,29 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             name = payload.get("name", "Daison")
             template = payload.get("template", "Sample Campaign Script")
             
-            # Resolve callback URL (ngrok / localtunnel / Exotel Applet URL)
-            public_cb = os.environ.get("EXOTEL_CALLBACK_URL", "")
+            call_id = f"call_{uuid.uuid4().hex[:12]}"
             
+            # 1. Synthesize text prompt into ElevenLabs TTS MP3 audio
+            audio_path = synthesize_prompt_audio(template, call_id=call_id)
+            
+            # 2. Construct public ElevenLabs audio URL
+            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
+            audio_url = f"{public_base}/audio/{call_id}.mp3"
+            
+            # 3. Trigger live Exotel call using valid Exotel Applet flow
             call_res = platform.telephony.trigger_single_call(
                 recipient_phone=phone,
-                callback_url=public_cb,
-                custom_field=template
+                callback_url="",
+                custom_field=audio_url
             )
             self._send_json({
                 "status": "success",
-                "message": f"Test call dispatched to {phone}",
+                "message": f"ElevenLabs voice call dispatched to {phone}",
                 "target_phone": phone,
                 "recipient": name,
+                "call_id": call_id,
+                "audio_generated": bool(audio_path and os.path.exists(audio_path)),
+                "audio_url": audio_url,
                 "call_details": call_res
             })
 
