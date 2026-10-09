@@ -74,7 +74,7 @@
 
 		try {
 			// Configure the shared agent (assistant or caller) before connecting.
-			for (const base of ['http://localhost:8765', 'http://10.80.0.48:8765', '']) {
+			for (const base of ['http://localhost:8765', 'http://x1carbon:8765', '']) {
 				try {
 					const ep = base ? `${base}/api/convai/configure` : apiUrl('/api/convai/configure');
 					await fetch(ep, {

@@ -22,9 +22,9 @@ export const AutoDialer = registerPlugin<AutoDialerPlugin>('AutoDialer');
 export const isNative = Capacitor.isNativePlatform();
 
 // When running on Android via Capacitor, adb reverse forwards tcp:8765 to localhost:8765.
-// We try localhost:8765, with fallback to host LAN IP 10.80.0.48:8765.
+// We try localhost:8765, with fallback to the host machine (x1carbon) over the LAN/tailnet.
 const BRIDGE_ENDPOINTS = isNative
-	? ['http://localhost:8765', 'http://10.80.0.48:8765']
+	? ['http://localhost:8765', 'http://x1carbon:8765']
 	: [''];
 
 let activeBridgeUrl = isNative ? 'http://localhost:8765' : '';

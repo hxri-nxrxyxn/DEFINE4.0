@@ -12,7 +12,7 @@ export const variables = defineEnvVars({
 	PUBLIC_API_BASE_URL: {
 		public: true,
 		description:
-			'Origin the browser prefixes onto /api calls. Leave empty to use the same origin that serves the app. Set it (e.g. http://10.80.0.34:5173) when the UI is hosted separately from the dev server.',
+			'Origin the browser prefixes onto /api calls. Leave empty to use the same origin that serves the app. Set it (e.g. http://x1carbon:5173) when the UI is hosted separately from the dev server.',
 		schema: (value) => value ?? ''
 	},
 	SERVER_API_URL: {
