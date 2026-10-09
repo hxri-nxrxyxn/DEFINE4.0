@@ -101,6 +101,36 @@ function composeScript(baseText: string, spokenText: string): string {
 	].join('\n');
 }
 
+async function synthesizeElevenLabsTTS(text: string): Promise<string> {
+	try {
+		const cleanText = text.replace(/\{name\}/g, 'Daison').replace(/\n+/g, ' ');
+		const res = await fetch('https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM', {
+			method: 'POST',
+			headers: {
+				'xi-api-key': ELEVENLABS_API_KEY,
+				'Content-Type': 'application/json',
+				'Accept': 'audio/mpeg'
+			},
+			body: JSON.stringify({
+				text: cleanText,
+				model_id: 'eleven_multilingual_v2',
+				voice_settings: {
+					stability: 0.5,
+					similarity_boost: 0.75
+				}
+			})
+		});
+		if (res.ok) {
+			const arrayBuffer = await res.arrayBuffer();
+			const buffer = Buffer.from(arrayBuffer);
+			return buffer.toString('base64');
+		}
+	} catch (e) {
+		console.error('ElevenLabs TTS synthesis error:', e);
+	}
+	return '';
+}
+
 export const POST: RequestHandler = async ({ request }) => {
 	let baseText = '';
 	let transcriptText = '';
@@ -150,7 +180,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 
 		const promptInput = transcriptText.trim() || baseText.trim() || 'Organize a tech seminar invitation campaign.';
-		
+
 		// 2. Connect to ElevenLabs Conversational AI Agent via WebSocket to generate agent response
 		const agentResponse = await queryElevenLabsConvAI(promptInput);
 		const finalTranscript = agentResponse || promptInput;
@@ -160,17 +190,24 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		const finalScript = composeScript(baseText, finalTranscript);
 
+		// 4. Synthesize ElevenLabs audio MP3 as base64 for instant browser audio playback
+		const audioBase64 = await synthesizeElevenLabsTTS(finalScript);
+
 		return json({
 			status: 'success',
 			text: finalScript,
 			transcript: finalTranscript,
-			agent_response: agentResponse
+			agent_response: agentResponse,
+			audio_base_64: audioBase64
 		});
 	} catch (e) {
+		const fallbackScript = composeScript(baseText, transcriptText || 'Please confirm your attendance for our upcoming event.');
+		const fallbackAudio = await synthesizeElevenLabsTTS(fallbackScript);
 		return json({
 			status: 'fallback',
-			text: composeScript(baseText, transcriptText || 'Please confirm your attendance for our upcoming event.'),
-			transcript: transcriptText
+			text: fallbackScript,
+			transcript: transcriptText,
+			audio_base_64: fallbackAudio
 		});
 	}
 };

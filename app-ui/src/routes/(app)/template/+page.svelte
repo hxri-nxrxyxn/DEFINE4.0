@@ -6,7 +6,10 @@
 	import { campaign } from '#lib/state/campaign.svelte.js';
 	import Mic from '@lucide/svelte/icons/mic';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Volume2 from '@lucide/svelte/icons/volume-2';
 	import { toast } from 'svelte-sonner';
+
+	let playing = $state(false);
 
 	const templateTips = [
 		{
@@ -39,6 +42,32 @@
 	function reset() {
 		campaign.reset();
 		toast.info('Template reset');
+	}
+
+	async function playAudio() {
+		if (!campaign.templateText.trim()) return;
+		playing = true;
+		toast.info('Synthesizing ElevenLabs Voice…');
+		try {
+			const res = await fetch('/api/process', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text: campaign.templateText })
+			});
+			const data = await res.json();
+			if (data.audio_base_64) {
+				const player = new Audio(`data:audio/mpeg;base64,${data.audio_base_64}`);
+				player.onended = () => (playing = false);
+				void player.play();
+				toast.success('Playing ElevenLabs Voice Audio');
+			} else {
+				playing = false;
+				toast.error('Voice audio unavailable');
+			}
+		} catch (e) {
+			playing = false;
+			toast.error('Error generating audio preview');
+		}
 	}
 </script>
 
@@ -85,6 +114,7 @@
 	onPrimaryAction={() => goto('/preview')}
 	actions={[
 		{ icon: Trash2, label: 'Reset', onclick: reset },
+		{ icon: Volume2, label: playing ? 'Playing…' : 'Listen Voice', onclick: playAudio },
 		{ icon: Mic, label: 'Record audio', onclick: () => goto('/record') }
 	]}
 />

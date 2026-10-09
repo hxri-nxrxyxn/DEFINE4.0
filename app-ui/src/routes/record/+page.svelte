@@ -96,10 +96,16 @@
 
 		try {
 			const response = await fetch('/api/process', { method: 'POST', body: form });
-			const data = (await response.json()) as { text?: string };
+			const data = (await response.json()) as { text?: string; audio_base_64?: string };
 			if (data.text) {
 				campaign.templateText = data.text;
-				toast.success('Voice script generated with ElevenLabs AI!');
+				if (data.audio_base_64) {
+					try {
+						const player = new Audio(`data:audio/mpeg;base64,${data.audio_base_64}`);
+						void player.play().catch((e) => console.warn('Browser audio play error:', e));
+					} catch {}
+				}
+				toast.success('Voice script & audio generated with ElevenLabs AI!');
 			}
 		} catch (e) {
 			if (liveTranscript) {
