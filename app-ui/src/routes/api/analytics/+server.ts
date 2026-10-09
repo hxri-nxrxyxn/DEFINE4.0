@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { CORE_API_URL } from '#lib/server/backend.js';
 
 const FALLBACK_ANALYTICS = {
 	kpis: {
@@ -32,7 +33,7 @@ const FALLBACK_ANALYTICS = {
 
 export const GET: RequestHandler = async ({ fetch }) => {
 	try {
-		const res = await fetch('http://127.0.0.1:8000/api/analytics');
+		const res = await fetch(`${CORE_API_URL}/api/analytics`);
 		if (res.ok) {
 			const data = await res.json();
 			if (data.kpis && data.kpis.total_calls > 0) {

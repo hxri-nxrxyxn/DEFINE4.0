@@ -1,10 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { CORE_API_URL } from '#lib/server/backend.js';
 
 export const POST: RequestHandler = async ({ request, fetch }) => {
 	try {
 		const body = await request.json().catch(() => ({}));
-		const res = await fetch('http://127.0.0.1:8000/api/calls/dispatch', {
+		const res = await fetch(`${CORE_API_URL}/api/calls/dispatch`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body)

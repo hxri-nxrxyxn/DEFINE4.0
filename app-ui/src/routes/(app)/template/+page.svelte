@@ -4,6 +4,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import { campaign } from '#lib/state/campaign.svelte.js';
+	import { apiUrl } from '#lib/config.js';
 	import Mic from '@lucide/svelte/icons/mic';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import Volume2 from '@lucide/svelte/icons/volume-2';
@@ -49,7 +50,7 @@
 		playing = true;
 		toast.info('Synthesizing ElevenLabs Voice…');
 		try {
-			const res = await fetch('/api/process', {
+			const res = await fetch(apiUrl('/api/process'), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ text: campaign.templateText })

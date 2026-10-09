@@ -1,9 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { BRIDGE_URL } from '#lib/server/backend.js';
 
 export const GET: RequestHandler = async ({ fetch }) => {
 	try {
-		const res = await fetch('http://127.0.0.1:8765/status', { signal: AbortSignal.timeout(1500) });
+		const res = await fetch(`${BRIDGE_URL}/status`, { signal: AbortSignal.timeout(1500) });
 		if (res.ok) {
 			const data = await res.json();
 			return json(data);
@@ -20,7 +21,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 
 	if (action === 'end') {
 		try {
-			const res = await fetch('http://127.0.0.1:8765/end', {
+			const res = await fetch(`${BRIDGE_URL}/end`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				signal: AbortSignal.timeout(2000)
@@ -34,7 +35,7 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 
 	// Trigger call via dialer bridge
 	try {
-		const res = await fetch('http://127.0.0.1:8765/call', {
+		const res = await fetch(`${BRIDGE_URL}/call`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({

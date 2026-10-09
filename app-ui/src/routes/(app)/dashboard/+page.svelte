@@ -7,6 +7,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
+	import { apiUrl } from '#lib/config.js';
 	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -194,7 +195,8 @@
 			}
 
 			// Call has concluded (either answered + 10s passed, hung up, or declined during ringing)
-			if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'idle')) {
+			// Note: we're past the 'idle' early-return above, so the call is in progress here.
+			if (status.call_state === 'COMPLETED' || !status.active) {
 				isExecutingStep = true;
 				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
@@ -251,7 +253,7 @@
 
 	async function loadAnalytics() {
 		try {
-			const res = await fetch('/api/analytics');
+			const res = await fetch(apiUrl('/api/analytics'));
 			if (res.ok) {
 				const data = await res.json();
 				if (data.kpis) {
@@ -291,7 +293,7 @@
 	async function retryAll() {
 		retrying = true;
 		try {
-			await fetch('/api/retry', { method: 'POST' });
+			await fetch(apiUrl('/api/retry'), { method: 'POST' });
 		} catch (e) {
 			// offline fallback - retry list is derived locally anyway
 		} finally {

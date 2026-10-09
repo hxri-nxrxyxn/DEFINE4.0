@@ -1,4 +1,5 @@
 import { registerPlugin, Capacitor } from '@capacitor/core';
+import { apiUrl } from '#lib/config.js';
 
 export interface CallStateEvent {
 	state: 'IDLE' | 'RINGING' | 'OFFHOOK';
@@ -37,7 +38,7 @@ export async function triggerCall(phone: string, name = 'Recipient', duration = 
 	// First inform the bridge daemon (both localhost and LAN endpoints)
 	for (const base of (isNative ? BRIDGE_ENDPOINTS : [''])) {
 		try {
-			const endpoint = base ? `${base}/call` : '/api/calls/bridge';
+			const endpoint = base ? `${base}/call` : apiUrl('/api/calls/bridge');
 			const res = await fetch(endpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -81,7 +82,7 @@ export async function terminateCall(): Promise<boolean> {
 	const endpoints = isNative ? [activeBridgeUrl, ...BRIDGE_ENDPOINTS].filter(Boolean) : [''];
 	for (const base of endpoints) {
 		try {
-			const endpoint = base ? `${base}/end` : '/api/calls/bridge';
+			const endpoint = base ? `${base}/end` : apiUrl('/api/calls/bridge');
 			const res = await fetch(endpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -111,7 +112,7 @@ export async function pollCallStatus(): Promise<{
 	const endpoints = isNative ? [activeBridgeUrl, ...BRIDGE_ENDPOINTS].filter(Boolean) : [''];
 	for (const base of endpoints) {
 		try {
-			const endpoint = base ? `${base}/status` : '/api/calls/bridge';
+			const endpoint = base ? `${base}/status` : apiUrl('/api/calls/bridge');
 			const res = await fetch(endpoint, { signal: AbortSignal.timeout(1200) });
 			if (res.ok) {
 				activeBridgeUrl = base;

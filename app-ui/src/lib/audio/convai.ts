@@ -1,3 +1,5 @@
+import { apiUrl } from '#lib/config.js';
+
 export type ConvAICallbacks = {
 	onAgentMessage?: (text: string) => void;
 	onUserMessage?: (text: string) => void;
@@ -78,7 +80,7 @@ export async function startConvAISession(
 	const endpoints = [
 		'http://localhost:8765/api/convai/signed_url',
 		'http://10.80.0.48:8765/api/convai/signed_url',
-		'/api/convai/signed_url'
+		apiUrl('/api/convai/signed_url')
 	];
 
 	for (const ep of endpoints) {
@@ -95,28 +97,6 @@ export async function startConvAISession(
 			// try next
 		}
 	}
-
-	// Direct ElevenLabs API fallback if bridge or backend is unreachable
-	if (!signed_url) {
-		try {
-			const directRes = await fetch(
-				'https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=agent_8901m4gnv2a6f7xb5n0sbgbznz9f',
-				{
-					headers: {
-						'xi-api-key': 'sk_d9191a981f7ddca619f2dd4b1787e0cf6fd2e65a3c485e8a'
-					},
-					signal: AbortSignal.timeout(5000)
-				}
-			);
-			if (directRes.ok) {
-				const d = await directRes.json();
-				signed_url = d.signed_url;
-			}
-		} catch (err) {
-			console.error('Direct ElevenLabs signed url fallback failed:', err);
-		}
-	}
-
 	if (!signed_url) {
 		throw new Error('Could not obtain ElevenLabs signed URL');
 	}

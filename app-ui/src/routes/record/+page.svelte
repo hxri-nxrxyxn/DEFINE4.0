@@ -4,6 +4,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { startConvAISession, type ConvAISession } from '#lib/audio/convai.js';
 	import { campaign, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
+	import { apiUrl } from '#lib/config.js';
 	import Mic from '@lucide/svelte/icons/mic';
 	import Check from '@lucide/svelte/icons/check';
 	import X from '@lucide/svelte/icons/x';
@@ -68,7 +69,7 @@
 			// Configure the shared agent from the /template script before dialing (best effort).
 			for (const base of ['http://localhost:8765', 'http://10.80.0.48:8765', '']) {
 				try {
-					const ep = base ? `${base}/api/convai/configure` : '/api/convai/configure';
+					const ep = base ? `${base}/api/convai/configure` : apiUrl('/api/convai/configure');
 					await fetch(ep, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
