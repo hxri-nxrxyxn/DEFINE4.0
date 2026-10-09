@@ -8,7 +8,7 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
-	import { subscribeCalls, seedDemo, clearCalls, type CallRecord } from '#lib/firebase.js';
+	import { subscribeAllCalls, seedDemo, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
 	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
@@ -100,6 +100,25 @@
 		return [...m.entries()]
 			.sort((a, b) => b[1] - a[1])
 			.map(([label, value]) => ({ label, value, pct: Math.round((value / total) * 100) }));
+	});
+
+	const liveCampaignData = $derived.by(() => {
+		const m = new Map<string, { total: number; confirmed: number }>();
+		for (const c of liveCalls) {
+			const k = c.campaign || 'Campaign';
+			const e = m.get(k) ?? { total: 0, confirmed: 0 };
+			e.total += 1;
+			if (c.disposition === 'confirmed') e.confirmed += 1;
+			m.set(k, e);
+		}
+		return [...m.entries()]
+			.sort((a, b) => b[1].total - a[1].total)
+			.map(([label, e]) => ({
+				label,
+				value: e.total,
+				confirmed: e.confirmed,
+				pct: Math.round((e.confirmed / Math.max(1, e.total)) * 100)
+			}));
 	});
 
 	async function seedFirebase() {
@@ -440,8 +459,8 @@
 		loadAnalytics();
 		// Poll loop every 800ms
 		loopTimer = setInterval(runAutoDialerLoop, 800);
-		// Live data from Firebase RTDB
-		unsubCalls = subscribeCalls(campaign.campaignId, (c) => {
+		// Live data from Firebase RTDB (all campaigns)
+		unsubCalls = subscribeAllCalls((c) => {
 			liveCalls = c;
 		});
 	});
@@ -577,6 +596,25 @@
 								</div>
 								<div class="h-2 w-full overflow-hidden rounded-full bg-muted">
 									<div class="h-full rounded-full bg-primary" style="width: {s.pct}%"></div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-2 text-xs font-medium text-muted-foreground">By campaign</p>
+					<div class="space-y-2">
+						{#each liveCampaignData as cp (cp.label)}
+							<div class="space-y-1">
+								<div class="flex items-center justify-between text-xs">
+									<span class="truncate text-foreground">{cp.label}</span>
+									<span class="tabular-nums text-muted-foreground">
+										{cp.value} calls · {cp.pct}% confirmed
+									</span>
+								</div>
+								<div class="h-2 w-full overflow-hidden rounded-full bg-muted">
+									<div class="h-full rounded-full bg-emerald-500" style="width: {cp.pct}%"></div>
 								</div>
 							</div>
 						{/each}

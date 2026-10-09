@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "node scripts/dev.mjs",
 		"dev:vite": "vite dev",
+		"seed": "node scripts/seed-rtdb.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

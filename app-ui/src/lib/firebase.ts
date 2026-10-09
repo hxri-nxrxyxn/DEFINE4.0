@@ -80,8 +80,7 @@ export async function publishCall(cid: string, call: CallRecord): Promise<void> 
 	await set(node, call);
 }
 
-export function subscribeCalls(cid: string, cb: (calls: CallRecord[]) => void): () => void {
-	const database = getDb();
+export function subscribeCalls(cid: string, cb: (calls: CallRecord[]) => void): () => void {	const database = getDb();
 	if (!database) {
 		cb([]);
 		return () => {};
@@ -97,6 +96,39 @@ export function subscribeCalls(cid: string, cb: (calls: CallRecord[]) => void): 
 		},
 		(err) => {
 			console.error('[firebase] calls subscription error:', err);
+			cb([]);
+		}
+	);
+	return unsub;
+}
+
+/** Subscribe to every campaign's calls (aggregated), so the dashboard can show
+ *  all seeded/live data and break outcomes down by campaign. */
+export function subscribeAllCalls(
+	cb: (calls: (CallRecord & { id: string })[]) => void
+): () => void {
+	const database = getDb();
+	if (!database) {
+		cb([]);
+		return () => {};
+	}
+	const unsub = onValue(
+		ref(database, ROOT),
+		(snap) => {
+			const val = (snap.val() || {}) as Record<string, any>;
+			const out: (CallRecord & { id: string })[] = [];
+			for (const [cid, camp] of Object.entries(val)) {
+				const calls = camp?.calls || {};
+				const metaName = camp?.meta?.name;
+				for (const [id, c] of Object.entries<any>(calls)) {
+					out.push({ id: `${cid}:${id}`, campaign: c?.campaign || metaName, ...c });
+				}
+			}
+			out.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+			cb(out);
+		},
+		(err) => {
+			console.error('[firebase] all-calls subscription error:', err);
 			cb([]);
 		}
 	);
