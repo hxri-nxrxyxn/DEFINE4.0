@@ -309,11 +309,9 @@
 							{/if}
 						</div>
 						<div>
-							<Card.Title class="text-base font-semibold">Live IVR Dialer</Card.Title>
+							<Card.Title class="text-base font-semibold">IVR Dialer</Card.Title>
 							<Card.Description class="text-xs">
-								{campaign.isCampaignRunning
-									? 'Running auto-dialer sequence with 10s connected duration'
-									: 'Dialer ready. Click resume to initiate automated calling sequence'}
+								{campaign.isCampaignRunning ? 'Auto-dialing · 10s per call' : 'Idle'}
 							</Card.Description>
 						</div>
 					</div>
@@ -394,26 +392,17 @@
 
 	<div class="grid grid-cols-3 gap-3">
 		{#each stats as stat (stat.label)}
-			<Card.Root class="gap-2">
-				<Card.Content class="space-y-1 px-4 py-4">
+			<Card.Root class="gap-0">
+				<Card.Content class="space-y-1 px-4 py-5">
 					<p class="text-xs text-muted-foreground">{stat.label}</p>
-					<p class="text-xl font-semibold tabular-nums">{stat.value}</p>
+					<p class="text-2xl font-semibold tabular-nums">{stat.value}</p>
 				</Card.Content>
 			</Card.Root>
 		{/each}
-		<Card.Root class="gap-2">
-			<Card.Content class="flex flex-col items-center justify-center gap-1 px-4 py-4">
-				<div
-					class="grid size-12 place-items-center rounded-full"
-					style="background: conic-gradient(var(--foreground) {connectRatePct}%, var(--muted) 0)"
-				>
-					<div
-						class="grid size-9 place-items-center rounded-full bg-card text-xs font-semibold"
-					>
-						{connectRatePct}%
-					</div>
-				</div>
+		<Card.Root class="gap-0">
+			<Card.Content class="space-y-1 px-4 py-5">
 				<p class="text-xs text-muted-foreground">Connect rate</p>
+				<p class="text-2xl font-semibold tabular-nums">{connectRatePct}%</p>
 			</Card.Content>
 		</Card.Root>
 	</div>
