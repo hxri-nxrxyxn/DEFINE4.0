@@ -5,39 +5,28 @@
 	import { ActionBar } from '#lib/components/action-bar/index.js';
 	import * as Chart from '#lib/components/ui/chart/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
-	import * as Table from '#lib/components/ui/table/index.js';
-	import * as Tabs from '#lib/components/ui/tabs/index.js';
-	import { Badge } from '#lib/components/ui/badge/index.js';
-	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign } from '#lib/state/campaign.svelte.js';
-	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Download from '@lucide/svelte/icons/download';
-	import TrendingUp from '@lucide/svelte/icons/trending-up';
+	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Voicemail from '@lucide/svelte/icons/voicemail';
-	import PhoneCall from '@lucide/svelte/icons/phone-call';
-	import CheckCircle2 from '@lucide/svelte/icons/check-circle-2';
-	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import { toast } from 'svelte-sonner';
 
 	let loading = $state(true);
 	let retrying = $state(false);
-	let selectedTab = $state('all');
 
-	let stats = $state({
-		totalCalls: '1,284',
-		connectedCalls: '873',
-		connectRatePct: 68.0,
-		confirmedCount: '592',
-		confirmationRatePct: 46.1,
-		queuedRetries: 37
-	});
+	let stats = $state([
+		{ label: 'Calls placed', value: '1,284' },
+		{ label: 'Queued retries', value: '37' }
+	]);
+
+	let connectRatePct = $state(68);
 
 	let languageData = $state([
-		{ key: 'hi', label: 'Hindi', value: 244, color: 'var(--chart-1)', total: 420, pct: 58 },
-		{ key: 'ta', label: 'Tamil', value: 170, color: 'var(--chart-2)', total: 290, pct: 59 },
-		{ key: 'te', label: 'Telugu', value: 139, color: 'var(--chart-3)', total: 245, pct: 57 },
-		{ key: 'mr', label: 'Marathi', value: 108, color: 'var(--chart-4)', total: 184, pct: 59 },
-		{ key: 'ml', label: 'Malayalam', value: 91, color: 'var(--chart-5)', total: 145, pct: 63 }
+		{ key: 'hi', label: 'Hindi', value: 244, color: 'var(--chart-1)' },
+		{ key: 'ta', label: 'Tamil', value: 170, color: 'var(--chart-2)' },
+		{ key: 'te', label: 'Telugu', value: 139, color: 'var(--chart-3)' },
+		{ key: 'mr', label: 'Marathi', value: 108, color: 'var(--chart-4)' },
+		{ key: 'ml', label: 'Malayalam', value: 91, color: 'var(--chart-5)' }
 	]);
 
 	const languageConfig = {
@@ -48,19 +37,11 @@
 		ml: { label: 'Malayalam', color: 'var(--chart-5)' }
 	} satisfies Chart.ChartConfig;
 
-	let callRecords = $state([
-		{ name: 'Daison', phone: '+91 99••• ••835', lang: 'Hindi', type: 'Invitations', status: 'CONFIRMED', badge: 'default', action: 'Connected' },
-		{ name: 'Ananya Sharma', phone: '+91 98••• ••210', lang: 'Hindi', type: 'RSVP Update', status: 'CONFIRMED', badge: 'default', action: 'Connected' },
-		{ name: 'Karthik Iyer', phone: '+91 99••• ••845', lang: 'Tamil', type: 'Invitations', status: 'CONFIRMED', badge: 'default', action: 'Connected' },
-		{ name: 'Meera Nair', phone: '+91 97••• ••019', lang: 'Malayalam', type: 'Clinic Reminder', status: 'VOICEMAIL_LEFT', badge: 'outline', action: 'Voicemail' },
-		{ name: 'Rohan Gupta', phone: '+91 96••• ••733', lang: 'Marathi', type: 'School PTA', status: 'RETRY_SCHEDULED', badge: 'secondary', action: 'Retry Pending' }
+	let retries = $state([
+		{ campaign: 'Diwali Seminar', count: 18 },
+		{ campaign: 'City Clinic Reminders', count: 12 },
+		{ campaign: 'School Parents Sync', count: 7 }
 	]);
-
-	let filteredRecords = $derived(
-		selectedTab === 'all'
-			? callRecords
-			: callRecords.filter((r) => r.lang.toLowerCase() === selectedTab)
-	);
 
 	async function loadAnalytics() {
 		try {
@@ -68,12 +49,11 @@
 			if (res.ok) {
 				const data = await res.json();
 				if (data.kpis) {
-					stats.totalCalls = Number(data.kpis.total_calls).toLocaleString();
-					stats.connectedCalls = Number(data.kpis.connected_calls || 0).toLocaleString();
-					stats.connectRatePct = Math.round(data.kpis.connect_rate_pct ?? 68);
-					stats.confirmedCount = Number(data.kpis.confirmed_count || 592).toLocaleString();
-					stats.confirmationRatePct = Math.round(data.kpis.confirmation_rate_pct ?? 46);
-					stats.queuedRetries = data.kpis.retryable_non_responders ?? 37;
+					stats = [
+						{ label: 'Calls placed', value: Number(data.kpis.total_calls).toLocaleString() },
+						{ label: 'Queued retries', value: String(data.kpis.retryable_non_responders ?? 37) }
+					];
+					connectRatePct = Math.round(data.kpis.connect_rate_pct ?? 68);
 				}
 				if (data.by_language) {
 					const colors = [
@@ -84,22 +64,16 @@
 						'var(--chart-5)'
 					];
 					const entries = Object.entries(data.by_language);
-					languageData = entries.map(([name, stat]: [string, any], idx) => {
-						const tot = stat.total || 1;
-						const conf = stat.confirmed || 0;
-						return {
-							key: name.toLowerCase(),
-							label: name,
-							value: conf,
-							total: tot,
-							pct: Math.round((conf / tot) * 100),
-							color: colors[idx % colors.length]
-						};
-					});
+					languageData = entries.map(([name, stat]: [string, any], idx) => ({
+						key: name.toLowerCase(),
+						label: name,
+						value: stat.confirmed || stat.total || 0,
+						color: colors[idx % colors.length]
+					}));
 				}
 			}
 		} catch (e) {
-			console.error('Failed to load analytics:', e);
+			console.error('Analytics load error:', e);
 		} finally {
 			loading = false;
 		}
@@ -115,12 +89,10 @@
 			const res = await fetch('/api/retry', { method: 'POST' });
 			const result = await res.json();
 			toast.success('Retrying non-responders', {
-				description: `${result.queued_retries || stats.queuedRetries} calls queued for optimal outreach window.`
+				description: `${result.queued_retries || 37} calls queued for the next window.`
 			});
-			stats.queuedRetries = 0;
-			callRecords = callRecords.map((r) =>
-				r.status === 'RETRY_SCHEDULED' ? { ...r, status: 'RETRY_DISPATCHED', badge: 'default', action: 'Dialing...' } : r
-			);
+			stats[1].value = '0';
+			retries = [];
 		} catch (e) {
 			toast.success('Retrying non-responders', {
 				description: '37 calls queued for the next window.'
@@ -130,209 +102,101 @@
 		}
 	}
 
-	function retryRow(name: string) {
-		callRecords = callRecords.map((r) =>
-			r.name === name ? { ...r, status: 'RETRY_DISPATCHED', badge: 'default', action: 'Dialing...' } : r
-		);
-		stats.queuedRetries = Math.max(0, stats.queuedRetries - 1);
-		toast.success(`Retrying ${name}`, { description: 'Exotel dialer connected.' });
-	}
-
 	function exportReport() {
 		const csvContent =
-			'data:text/csv;charset=utf-8,Name,Phone,Language,CallType,Status\n' +
-			'Daison,+91 995283835,Hindi,Invitations,CONFIRMED\n' +
-			'Ananya Sharma,+91 982101122,Hindi,RSVP,CONFIRMED\n' +
-			'Karthik Iyer,+91 998453322,Tamil,Invitations,CONFIRMED\n' +
-			'Meera Nair,+91 970194455,Malayalam,Clinic,VOICEMAIL_LEFT\n' +
-			'Rohan Gupta,+91 967335566,Marathi,School,RETRY_SCHEDULED\n';
+			'data:text/csv;charset=utf-8,Campaign,Language,Status\n' +
+			'Diwali Seminar,Hindi,Confirmed\n' +
+			'City Clinic Reminders,Tamil,Confirmed\n' +
+			'School Parents Sync,Telugu,Retry Scheduled\n';
 		const encodedUri = encodeURI(csvContent);
 		const link = document.createElement('a');
 		link.setAttribute('href', encodedUri);
-		link.setAttribute('download', `campaign_analytics_${Date.now()}.csv`);
+		link.setAttribute('download', `campaign_report_${Date.now()}.csv`);
 		document.body.appendChild(link);
 		link.click();
 		document.body.removeChild(link);
-		toast.success('Report exported', { description: 'campaign_analytics.csv downloaded.' });
+		toast.success('Report exported', { description: 'campaign-report.csv downloaded.' });
 	}
 </script>
 
 <div class="space-y-6 py-2">
-	<!-- Dashboard Typography Header -->
 	<div class="space-y-1">
-		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Campaign Analytics</h1>
-		<p class="text-sm text-muted-foreground">
-			Outcomes broken down by campaign, regional language, and audience segment.
-		</p>
+		<h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+		<p class="text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
 	</div>
 
-	<!-- SectionCards Block (shadcn dashboard-01 KPI Cards) -->
-	<div class="grid grid-cols-2 gap-3 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs">
-		<Card.Root>
-			<Card.Header class="p-4 pb-2">
-				<Card.Description class="text-xs">Total Calls</Card.Description>
-				<Card.Title class="text-2xl font-semibold tabular-nums">{stats.totalCalls}</Card.Title>
-				<Card.Action>
-					<Badge variant="outline" class="gap-1 text-[11px]">
-						<TrendingUp class="size-3 text-emerald-500" />
-						+{stats.connectRatePct}%
-					</Badge>
-				</Card.Action>
-			</Card.Header>
-			<Card.Footer class="p-4 pt-0 text-xs text-muted-foreground">
-				{stats.connectedCalls} connected calls
-			</Card.Footer>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header class="p-4 pb-2">
-				<Card.Description class="text-xs">Connect Rate</Card.Description>
-				<Card.Title class="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-					{stats.connectRatePct}%
-				</Card.Title>
-				<Card.Action>
-					<Badge variant="outline" class="gap-1 text-[11px]">
-						<CheckCircle2 class="size-3 text-emerald-500" />
-						Active
-					</Badge>
-				</Card.Action>
-			</Card.Header>
-			<Card.Footer class="p-4 pt-0 text-xs text-muted-foreground">
-				Exotel carrier connected
-			</Card.Footer>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header class="p-4 pb-2">
-				<Card.Description class="text-xs">RSVP Confirmations</Card.Description>
-				<Card.Title class="text-2xl font-semibold tabular-nums">{stats.confirmationRatePct}%</Card.Title>
-				<Card.Action>
-					<Badge variant="outline" class="gap-1 text-[11px]">
-						<PhoneCall class="size-3 text-primary" />
-						{stats.confirmedCount}
-					</Badge>
-				</Card.Action>
-			</Card.Header>
-			<Card.Footer class="p-4 pt-0 text-xs text-muted-foreground">
-				Direct intent capture
-			</Card.Footer>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header class="p-4 pb-2">
-				<Card.Description class="text-xs">Queued Retries</Card.Description>
-				<Card.Title class="text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-					{stats.queuedRetries}
-				</Card.Title>
-				<Card.Action>
-					<Badge variant="secondary" class="gap-1 text-[11px]">
-						<RotateCcw class="size-3" />
-						Pending
-					</Badge>
-				</Card.Action>
-			</Card.Header>
-			<Card.Footer class="p-4 pt-0 text-xs text-muted-foreground">
-				Algorithmic backoff policy
-			</Card.Footer>
+	<div class="grid grid-cols-3 gap-3">
+		{#each stats as stat (stat.label)}
+			<Card.Root class="gap-2">
+				<Card.Content class="space-y-1 px-4 py-4">
+					<p class="text-xs text-muted-foreground">{stat.label}</p>
+					<p class="text-xl font-semibold tabular-nums">{stat.value}</p>
+				</Card.Content>
+			</Card.Root>
+		{/each}
+		<Card.Root class="gap-2">
+			<Card.Content class="flex flex-col items-center justify-center gap-1 px-4 py-4">
+				<div
+					class="grid size-12 place-items-center rounded-full"
+					style="background: conic-gradient(var(--foreground) {connectRatePct}%, var(--muted) 0)"
+				>
+					<div
+						class="grid size-9 place-items-center rounded-full bg-card text-xs font-semibold"
+					>
+						{connectRatePct}%
+					</div>
+				</div>
+				<p class="text-xs text-muted-foreground">Connect rate</p>
+			</Card.Content>
 		</Card.Root>
 	</div>
 
-	<!-- Calls by Language with Tabs & PieChart -->
 	<Card.Root>
 		<Card.Header>
-			<div class="flex items-center justify-between">
-				<div>
-					<Card.Title class="text-base font-semibold">Calls by Regional Language</Card.Title>
-					<Card.Description class="text-xs">Distribution across 8 Indic languages.</Card.Description>
-				</div>
-				<Badge variant="outline" class="gap-1 text-[11px]">
-					<ShieldCheck class="size-3 text-emerald-500" /> DPDPA Sovereign
-				</Badge>
-			</div>
+			<Card.Title class="text-base">Calls by language</Card.Title>
+			<Card.Description>Volume across regional languages.</Card.Description>
 		</Card.Header>
-
-		<Card.Content class="space-y-4">
-			<Tabs.Root bind:value={selectedTab}>
-				<Tabs.List class="grid w-full grid-cols-6 h-8 text-xs">
-					<Tabs.Trigger value="all" class="text-[11px] px-1">All</Tabs.Trigger>
-					<Tabs.Trigger value="hindi" class="text-[11px] px-1">Hindi</Tabs.Trigger>
-					<Tabs.Trigger value="tamil" class="text-[11px] px-1">Tamil</Tabs.Trigger>
-					<Tabs.Trigger value="telugu" class="text-[11px] px-1">Telugu</Tabs.Trigger>
-					<Tabs.Trigger value="marathi" class="text-[11px] px-1">Marathi</Tabs.Trigger>
-					<Tabs.Trigger value="malayalam" class="text-[11px] px-1">Malayalam</Tabs.Trigger>
-				</Tabs.List>
-			</Tabs.Root>
-
-			<Chart.Container config={languageConfig} class="mx-auto h-48 w-full">
-				<PieChart data={languageData} value="value" c="color" innerRadius={60}>
+		<Card.Content class="space-y-3">
+			<Chart.Container config={languageConfig} class="mx-auto h-52 w-full">
+				<PieChart data={languageData} value="value" c="color" innerRadius={62}>
 					{#snippet tooltip()}
 						<Chart.Tooltip />
 					{/snippet}
 				</PieChart>
 			</Chart.Container>
-
 			<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
 				{#each languageData as item (item.label)}
-					<div class="flex items-center gap-2 p-1.5 rounded-lg bg-muted/40 border border-border/50">
+					<div class="flex items-center gap-2">
 						<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {item.color}"></span>
-						<span class="font-medium text-foreground">{item.label}</span>
-						<span class="ml-auto tabular-nums text-muted-foreground">{item.value} ({item.pct}%)</span>
+						<span class="text-muted-foreground">{item.label}</span>
+						<span class="ml-auto tabular-nums">{item.value}</span>
 					</div>
 				{/each}
 			</div>
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Call Records Data Table (dashboard-01 DataTable Block) -->
 	<Card.Root>
-		<Card.Header class="pb-3">
-			<div class="flex items-center justify-between">
-				<div>
-					<Card.Title class="text-base font-semibold">Recent Call Records</Card.Title>
-					<Card.Description class="text-xs">Real-time status of dispatched outbound calls.</Card.Description>
-				</div>
-				<Button variant="outline" size="xs" class="rounded-xl gap-1" onclick={retryAll} disabled={retrying}>
-					<RotateCcw class="size-3" /> Retry All
-				</Button>
-			</div>
+		<Card.Header>
+			<Card.Title class="text-base">Retry non-responders</Card.Title>
+			<Card.Description>Calls pending a second attempt.</Card.Description>
 		</Card.Header>
-
-		<Card.Content class="p-0">
-			<Table.Root>
-				<Table.Header>
-					<Table.Row class="text-xs">
-						<Table.Head class="w-[110px]">Recipient</Table.Head>
-						<Table.Head>Language</Table.Head>
-						<Table.Head>Status</Table.Head>
-						<Table.Head class="text-right">Action</Table.Head>
-					</Table.Row>
-				</Table.Header>
-				<Table.Body class="text-xs">
-					{#each filteredRecords as record (record.name)}
-						<Table.Row>
-							<Table.Cell class="font-medium py-2.5">
-								<div class="font-semibold text-foreground">{record.name}</div>
-								<div class="text-[10px] font-mono text-muted-foreground">{record.phone}</div>
-							</Table.Cell>
-							<Table.Cell class="py-2.5">{record.lang}</Table.Cell>
-							<Table.Cell class="py-2.5">
-								<Badge variant={record.badge as any} class="text-[10px] px-1.5 py-0">
-									{record.status}
-								</Badge>
-							</Table.Cell>
-							<Table.Cell class="py-2.5 text-right">
-								{#if record.status === 'RETRY_SCHEDULED'}
-									<Button variant="outline" size="xs" class="h-6 text-[10px] px-2 rounded-lg" onclick={() => retryRow(record.name)}>
-										Dial Now
-									</Button>
-								{:else}
-									<span class="text-[11px] text-muted-foreground">{record.action}</span>
-								{/if}
-							</Table.Cell>
-						</Table.Row>
-					{/each}
-				</Table.Body>
-			</Table.Root>
+		<Card.Content class="space-y-3">
+			{#if retries.length > 0}
+				{#each retries as item (item.campaign)}
+					<div class="flex items-center justify-between gap-3">
+						<div class="flex items-center gap-2">
+							<Voicemail class="size-4 text-muted-foreground" />
+							<span class="text-sm">{item.campaign}</span>
+						</div>
+						<span class="text-sm tabular-nums text-muted-foreground">{item.count}</span>
+					</div>
+				{/each}
+			{:else}
+				<div class="py-2 text-center text-xs text-muted-foreground">
+					No pending retries.
+				</div>
+			{/if}
 		</Card.Content>
 	</Card.Root>
 </div>
