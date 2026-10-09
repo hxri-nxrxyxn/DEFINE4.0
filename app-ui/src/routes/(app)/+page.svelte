@@ -151,10 +151,10 @@
 							<FileSpreadsheet class="size-4" />
 						</div>
 						<div>
-							<Card.Title class="text-sm font-semibold leading-none">
+							<Card.Title class="text-sm font-semibold leading-none tracking-tight">
 								{campaign.csvName || 'Call Chart'}
 							</Card.Title>
-							<Card.Description class="text-xs mt-1">
+							<Card.Description class="text-xs text-muted-foreground mt-1">
 								{campaign.recipients.length} recipients in call chart
 							</Card.Description>
 						</div>
@@ -181,21 +181,21 @@
 							<table class="w-full table-fixed text-xs">
 								<thead class="bg-muted/50 sticky top-0 z-10 border-b border-border">
 									<tr class="text-muted-foreground text-left">
-										<th class="h-8 px-3 font-medium w-[36%]">Name</th>
-										<th class="h-8 px-2 font-medium w-[40%]">Phone</th>
-										<th class="h-8 px-3 font-medium text-right w-[24%]">Language</th>
+										<th class="h-8 px-3 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[36%]">Name</th>
+										<th class="h-8 px-2 text-left align-middle text-xs font-medium text-muted-foreground tracking-tight w-[40%]">Phone</th>
+										<th class="h-8 px-3 text-right align-middle text-xs font-medium text-muted-foreground tracking-tight w-[24%]">Language</th>
 									</tr>
 								</thead>
 								<tbody class="divide-y divide-border/40">
 									{#each campaign.recipients as recipient, i (i)}
 										<tr class="hover:bg-muted/30 transition-colors">
-											<td class="py-2.5 px-3 font-medium text-foreground truncate" title={recipient.name}>
+											<td class="py-2.5 px-3 align-middle text-xs font-medium text-foreground tracking-tight truncate" title={recipient.name}>
 												{recipient.name}
 											</td>
-											<td class="py-2.5 px-2 font-mono text-muted-foreground truncate" title={recipient.phone}>
+											<td class="py-2.5 px-2 align-middle text-xs font-mono text-muted-foreground truncate" title={recipient.phone}>
 												{recipient.phone}
 											</td>
-											<td class="py-2.5 px-3 text-right text-muted-foreground truncate" title={recipient.language}>
+											<td class="py-2.5 px-3 align-middle text-right text-xs text-muted-foreground font-normal truncate" title={recipient.language}>
 												{recipient.language || 'Hindi'}
 											</td>
 										</tr>
@@ -211,7 +211,7 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							class="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1.5"
+							class="text-xs font-medium text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1.5"
 							onclick={deleteRoster}
 						>
 							<Trash2 class="size-3.5" />
@@ -221,7 +221,7 @@
 							<Button
 								variant="ghost"
 								size="sm"
-								class="text-xs text-muted-foreground hover:text-foreground h-8 px-2"
+								class="text-xs font-medium text-muted-foreground hover:text-foreground h-8 px-2"
 								onclick={editManualRoster}
 							>
 								Edit
@@ -230,13 +230,13 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							class="text-xs text-muted-foreground hover:text-foreground h-8 px-2"
+							class="text-xs font-medium text-muted-foreground hover:text-foreground h-8 px-2"
 							onclick={() => fileInput.click()}
 						>
 							Replace
 						</Button>
 					</div>
-					<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs" onclick={() => (showModal = false)}>
+					<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs font-medium" onclick={() => (showModal = false)}>
 						Done
 					</Button>
 				</Card.Footer>
@@ -244,8 +244,8 @@
 				<!-- Manual Editor / Upload Mode -->
 				<Card.Header class="flex flex-row items-center justify-between pt-4 pb-2 px-4">
 					<div>
-						<Card.Title class="text-sm font-semibold">Contact Recipients</Card.Title>
-						<Card.Description class="text-xs">Add target names, phone numbers, and language.</Card.Description>
+						<Card.Title class="text-sm font-semibold leading-none tracking-tight">Contact Recipients</Card.Title>
+						<Card.Description class="text-xs text-muted-foreground mt-1">Add target names, phone numbers, and language.</Card.Description>
 					</div>
 					<Button variant="ghost" size="icon-sm" onclick={() => (showModal = false)}>
 						<X class="size-4" />
@@ -261,7 +261,7 @@
 										type="text"
 										bind:value={row.name}
 										placeholder="Contact name"
-										class="h-8 flex-1 px-2.5 text-xs rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+										class="h-8.5 flex-1 rounded-md border border-input bg-input/30 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring transition-colors"
 									/>
 									{#if contactRows.length > 1}
 										<button
@@ -280,11 +280,11 @@
 										type="text"
 										bind:value={row.phone}
 										placeholder="Phone (e.g. 9995283835)"
-										class="h-8 flex-1 px-2.5 text-xs rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-mono"
+										class="h-8.5 flex-1 rounded-md border border-input bg-input/30 px-2.5 text-xs font-mono text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring transition-colors"
 									/>
 									<select
 										bind:value={row.language}
-										class="h-8 w-28 px-2 text-xs rounded-lg border border-input bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring shrink-0"
+										class="h-8.5 w-28 rounded-md border border-input bg-input/30 px-2 text-xs font-normal text-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring transition-colors shrink-0"
 									>
 										{#each LANGUAGES as lang}
 											<option value={lang}>{lang}</option>
@@ -296,10 +296,10 @@
 					</div>
 
 					<div class="flex items-center justify-between pt-1">
-						<Button variant="outline" size="sm" class="rounded-xl text-xs gap-1 h-8" onclick={addRow}>
+						<Button variant="outline" size="sm" class="rounded-xl text-xs font-medium gap-1 h-8" onclick={addRow}>
 							<Plus class="size-3.5" /> Add Row
 						</Button>
-						<Button variant="ghost" size="sm" class="rounded-xl text-xs gap-1 h-8" onclick={() => fileInput.click()}>
+						<Button variant="ghost" size="sm" class="rounded-xl text-xs font-medium gap-1 h-8" onclick={() => fileInput.click()}>
 							<Upload class="size-3.5" /> Upload File
 						</Button>
 					</div>
@@ -309,17 +309,17 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1"
+						class="text-xs font-medium text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1"
 						onclick={clearAllRows}
 					>
 						<Trash2 class="size-3.5" />
 						Clear All
 					</Button>
 					<div class="flex items-center gap-2">
-						<Button variant="outline" size="sm" class="rounded-xl h-8 text-xs" onclick={() => (showModal = false)}>
+						<Button variant="outline" size="sm" class="rounded-xl h-8 text-xs font-medium" onclick={() => (showModal = false)}>
 							Cancel
 						</Button>
-						<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs" onclick={saveRoster}>
+						<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs font-medium" onclick={saveRoster}>
 							Save Recipients
 						</Button>
 					</div>
