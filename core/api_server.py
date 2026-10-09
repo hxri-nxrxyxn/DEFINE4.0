@@ -370,33 +370,57 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e), "fallback_agent_id": "agent_8901m4gnv2a6f7xb5n0sbgbznz9f"}, 500)
 
-        elif path in ["/api/exoml/start", "/api/calls/webhook/status", "/api/calls/webhook/passthru"]:
-            query = self.path.split("?")[1] if "?" in self.path else ""
-            call_id = ""
-            for q in query.split("&"):
-                if q.startswith("call_id="):
-                    call_id = q.split("=")[1]
-            
-            cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audio_cache")
-            if not call_id and os.path.exists(cache_dir):
-                files = sorted([f for f in os.listdir(cache_dir) if f.endswith(".mp3")], key=lambda f: os.path.getmtime(os.path.join(cache_dir, f)), reverse=True)
-                if files:
-                    call_id = files[0].replace(".mp3", "")
-
-            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
-            audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
-            
-            xml_content = get_exoml_response(audio_url, "Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs.")
-            data = xml_content.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/xml; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(data)
+        elif path in ["/api/exoml/start", "/api/calls/webhook/status", "/api/calls/webhook/passthru", "/api/calls/webhook/intent", "/passthru", "/exoml"]:
+            self._handle_exotel_webhook()
 
         else:
             self.send_error(404, "Endpoint not found")
+
+    def _handle_exotel_webhook(self, body_data: str = ""):
+        import urllib.parse
+
+        query = self.path.split("?")[1] if "?" in self.path else ""
+        params = urllib.parse.parse_qs(query)
+
+        if body_data:
+            try:
+                body_json = json.loads(body_data)
+                for k, v in body_json.items():
+                    params[k] = [str(v)]
+            except Exception:
+                body_qs = urllib.parse.parse_qs(body_data)
+                for k, v in body_qs.items():
+                    params[k] = v
+
+        call_id = ""
+        if "call_id" in params and params["call_id"]:
+            call_id = params["call_id"][0]
+        elif "CustomField" in params and params["CustomField"]:
+            call_id = params["CustomField"][0]
+
+        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audio_cache")
+        if not call_id and os.path.exists(cache_dir):
+            files = sorted([f for f in os.listdir(cache_dir) if f.endswith(".mp3")], key=lambda f: os.path.getmtime(os.path.join(cache_dir, f)), reverse=True)
+            if files:
+                call_id = files[0].replace(".mp3", "")
+
+        public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
+        audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
+
+        print(f"[Exotel Webhook] Path: {self.path} | call_id: {call_id} | audio_url: {audio_url}")
+
+        xml_content = get_exoml_response(
+            audio_url,
+            "Hello! This is an outbound campaign call from DEFINE Voice AI powered by ElevenLabs."
+        )
+        data = xml_content.encode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/xml; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         path = self.path.split("?")[0]
@@ -408,7 +432,10 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
         except Exception:
             payload = {}
 
-        if path == "/api/campaigns/create":
+        if path in ["/api/exoml/start", "/api/calls/webhook/status", "/api/calls/webhook/passthru", "/api/calls/webhook/intent", "/passthru", "/exoml"]:
+            self._handle_exotel_webhook(body)
+
+        elif path == "/api/campaigns/create":
             name = payload.get("name", "New Outbound Campaign")
             domain = payload.get("domain", "events")
             call_type = payload.get("call_type", "invitations")
@@ -442,47 +469,28 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
                 "manifest": manifest
             })
 
-        elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
-            query = self.path.split("?")[1] if "?" in self.path else ""
-            call_id = ""
-            for q in query.split("&"):
-                if q.startswith("call_id="):
-                    call_id = q.split("=")[1]
-            
-            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
-            audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
-            
-            xml_content = get_exoml_response(audio_url, "Hello! This is an outbound campaign call from DEFINE Voice AI.")
-            data = xml_content.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/xml; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(data)
-
         elif path == "/api/calls/dispatch":
             phone = payload.get("phone", "+919995283835")
             name = payload.get("name", "Daison")
             template = payload.get("template", "Sample Campaign Script")
-            
+
             call_id = f"call_{uuid.uuid4().hex[:12]}"
-            
+
             # 1. Dynamically update ElevenLabs Conversational AI Agent config (first_message & prompt)
             agent_updated = update_conversational_agent(template)
-            
+
             # 2. Synthesize text prompt into ElevenLabs TTS MP3 audio
             audio_path = synthesize_prompt_audio(template, call_id=call_id)
-            
+
             # 3. Construct public Cloudflare Tunnel ExoML endpoint URL for Exotel
             public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
             exoml_url = f"{public_base}/api/exoml/start?call_id={call_id}"
-            
-            # 4. Trigger live Exotel call with ExoML URL
+
+            # 4. Trigger live Exotel call with ExoML URL and pass call_id as custom_field
             call_res = platform.telephony.trigger_single_call(
                 recipient_phone=phone,
                 callback_url=exoml_url,
-                custom_field=template
+                custom_field=call_id
             )
             self._send_json({
                 "status": "success",

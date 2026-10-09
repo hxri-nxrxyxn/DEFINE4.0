@@ -2,15 +2,95 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
 const ELEVENLABS_API_KEY = 'sk_d9191a981f7ddca619f2dd4b1787e0cf6fd2e65a3c485e8a';
+const ELEVENLABS_AGENT_ID = 'agent_8901m4gnv2a6f7xb5n0sbgbznz9f';
+
+async function updateElevenLabsAgent(promptText: string) {
+	try {
+		await fetch(`https://api.elevenlabs.io/v1/convai/agents/${ELEVENLABS_AGENT_ID}`, {
+			method: 'PATCH',
+			headers: {
+				'xi-api-key': ELEVENLABS_API_KEY,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				conversation_config: {
+					agent: {
+						first_message: promptText,
+						prompt: {
+							prompt: `You are an interactive conversational AI call assistant for DEFINE. Campaign context: '${promptText}'. Respond naturally.`
+						}
+					}
+				}
+			})
+		});
+	} catch (e) {
+		console.error('ElevenLabs Agent Patch error:', e);
+	}
+}
+
+async function queryElevenLabsConvAI(promptText: string): Promise<string> {
+	try {
+		const signedUrlRes = await fetch(
+			`https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=${ELEVENLABS_AGENT_ID}`,
+			{
+				headers: { 'xi-api-key': ELEVENLABS_API_KEY }
+			}
+		);
+		if (!signedUrlRes.ok) throw new Error('Failed to get signed URL');
+		const { signed_url } = await signedUrlRes.json();
+
+		return new Promise((resolve) => {
+			const ws = new WebSocket(signed_url);
+			const agentTexts: string[] = [];
+			let timeoutTimer: any;
+
+			const finish = () => {
+				clearTimeout(timeoutTimer);
+				try { ws.close(); } catch {}
+				resolve(agentTexts.join(' ').trim());
+			};
+
+			timeoutTimer = setTimeout(() => {
+				finish();
+			}, 8000);
+
+			ws.onopen = () => {};
+			ws.onmessage = (evt) => {
+				try {
+					const data = JSON.parse(String(evt.data));
+					if (data.type === 'conversation_initiation_metadata') {
+						ws.send(
+							JSON.stringify({
+								type: 'user_transcript',
+								user_transcript: promptText
+							})
+						);
+					} else if (data.type === 'agent_response') {
+						const text = data.agent_response_event?.agent_response;
+						if (text) agentTexts.push(text);
+					} else if (data.type === 'ping') {
+						const eid = data.ping_event?.event_id;
+						ws.send(JSON.stringify({ type: 'pong', event_id: eid }));
+						if (agentTexts.length > 0) {
+							finish();
+						}
+					}
+				} catch {}
+			};
+			ws.onerror = () => finish();
+			ws.onclose = () => finish();
+		});
+	} catch (e) {
+		console.error('ElevenLabs ConvAI WS error:', e);
+		return '';
+	}
+}
 
 function composeScript(baseText: string, spokenText: string): string {
 	const body = spokenText.trim() || baseText.trim() || 'We invite you to join our event this weekend. Please let us know if you will be attending.';
-	
-	// If script already contains formatting, return clean text
 	if (body.includes('Press 1')) {
 		return body;
 	}
-
 	return [
 		'Hello {name},',
 		'',
@@ -43,7 +123,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			transcriptText = body.transcript || '';
 		}
 
-		// Try ElevenLabs Speech-to-Text API if audio blob is present
+		// 1. STT via ElevenLabs Speech-to-Text if audio present and no transcript
 		if (audioBlob && !transcriptText) {
 			try {
 				const elevenLabsForm = new FormData();
@@ -69,13 +149,22 @@ export const POST: RequestHandler = async ({ request }) => {
 			}
 		}
 
-		const finalTranscript = transcriptText.trim() || baseText.trim() || 'We are organizing an upcoming seminar for all registered participants. We would love to confirm your participation.';
+		const promptInput = transcriptText.trim() || baseText.trim() || 'Organize a tech seminar invitation campaign.';
+		
+		// 2. Connect to ElevenLabs Conversational AI Agent via WebSocket to generate agent response
+		const agentResponse = await queryElevenLabsConvAI(promptInput);
+		const finalTranscript = agentResponse || promptInput;
+
+		// 3. Update ElevenLabs Conversational Agent config (first_message & prompt)
+		await updateElevenLabsAgent(finalTranscript);
+
 		const finalScript = composeScript(baseText, finalTranscript);
 
 		return json({
 			status: 'success',
 			text: finalScript,
-			transcript: finalTranscript
+			transcript: finalTranscript,
+			agent_response: agentResponse
 		});
 	} catch (e) {
 		return json({

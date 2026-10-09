@@ -7,6 +7,8 @@
 	import Mic from '@lucide/svelte/icons/mic';
 	import Check from '@lucide/svelte/icons/check';
 	import X from '@lucide/svelte/icons/x';
+	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import { toast } from 'svelte-sonner';
 
 	type Status = 'requesting' | 'listening' | 'processing' | 'error';
 
@@ -62,7 +64,10 @@
 			const recording = await startRecording({
 				onLevel: (value) => (level = value),
 				onStop: (audio) => void finish(audio),
-				onError: () => (status = 'error')
+				onError: (err) => {
+					console.error('Audio recorder error:', err);
+					if (!disposed) status = 'error';
+				}
 			});
 			if (disposed) {
 				recording.cancel();
@@ -70,7 +75,8 @@
 			}
 			handle = recording;
 			status = 'listening';
-		} catch {
+		} catch (e) {
+			console.error('Mic access failed:', e);
 			if (!disposed) status = 'error';
 		}
 	}
@@ -93,10 +99,12 @@
 			const data = (await response.json()) as { text?: string };
 			if (data.text) {
 				campaign.templateText = data.text;
+				toast.success('Voice script generated with ElevenLabs AI!');
 			}
 		} catch (e) {
 			if (liveTranscript) {
 				campaign.templateText = `Hello {name},\n\n${liveTranscript}\n\nPress 1 to confirm, press 2 to reschedule, or press 9 to opt out.`;
+				toast.success('Voice transcript saved!');
 			}
 		}
 

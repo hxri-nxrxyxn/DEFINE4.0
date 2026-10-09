@@ -30,9 +30,9 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
 		onLevel,
 		onStop,
 		onError,
-		silenceDurationMs = 1100,
-		silenceThreshold = 0.02,
-		maxDurationMs = 15000
+		silenceDurationMs = 5000,
+		silenceThreshold = 0.015,
+		maxDurationMs = 60000
 	} = options;
 
 	let stream: MediaStream;

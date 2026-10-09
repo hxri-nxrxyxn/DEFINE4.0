@@ -1,4 +1,4 @@
-import { browser } from '$app/env';
+import { browser } from '$app/environment';
 import type { Recipient } from '#lib/csv.js';
 
 const STORAGE_KEY = 'campaign-draft';
