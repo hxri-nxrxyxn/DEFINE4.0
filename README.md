@@ -20,10 +20,10 @@ This platform transforms an event template and contact roster into an intelligen
 | :--- | :--- | :--- | :--- |
 | **1. Campaign Setup** | Template-driven, 4 call types (`invitations`, `rsvps`, `reminders`, `event_updates`), multi-city seminar handling, CSV ingestion. | [`core/campaign_manager.py`](file:///home/hari/code/python/define/core/campaign_manager.py), [`campaign_contacts_sample.csv`](file:///home/hari/code/python/define/campaign_contacts_sample.csv) | **Complete & Verified** |
 | **2. Calling Engine** | Multilingual voice, dual-modality intent capture (DTMF + Speech), Answering Machine Detection (AMD), Exotel integration. | [`core/telephony.py`](file:///home/hari/code/python/define/core/telephony.py), [`core/intent_engine.py`](file:///home/hari/code/python/define/core/intent_engine.py), [`core/amd_engine.py`](file:///home/hari/code/python/define/core/amd_engine.py) | **Complete & Verified** |
-| **3. Architecture Decision** | Justified choice between pre-recorded, conversational agent, or hybrid across cost, latency, coverage. | [`ARCHITECTURE_DECISION.md`](file:///home/hari/code/python/define/ARCHITECTURE_DECISION.md) (Deterministic-First Hybrid) | **Complete & Documented** |
+| **3. Architecture Decision** | Justified choice between pre-recorded, conversational agent, or hybrid across cost, latency, coverage. | [`docs/ARCHITECTURE_DECISION.md`](file:///home/hari/code/python/define/docs/ARCHITECTURE_DECISION.md) (Deterministic-First Hybrid) | **Complete & Documented** |
 | **4. Domain Reusability** | Extensible to Clinic Reminders, School-Parent Communication, Payment Reminders. | Verified across 4 domain schemas & datasets: `clinic_contacts_sample.csv`, `school_contacts_sample.csv`, `payment_contacts_sample.csv`. | **Complete & Verified** |
 | **5. Operations Dashboard** | Outcomes broken down by campaign, regional language, audience segment, and 1-click retry for non-responders. | SvelteKit UI in `app-ui/src/routes/(app)/dashboard/+page.svelte` + API server web console at `http://localhost:8000`. | **Complete & Tested** |
-| **6. Data Protection & Residency** | Encryption of contact PII, short-TTL audio purging, domestic cloud residency (AWS `ap-south-1` & Exotel Mumbai). | [`DATA_PRIVACY_AND_RESIDENCY.md`](file:///home/hari/code/python/define/DATA_PRIVACY_AND_RESIDENCY.md), [`core/data_governance.py`](file:///home/hari/code/python/define/core/data_governance.py) | **Complete & Verified** |
+| **6. Data Protection & Residency** | Encryption of contact PII, short-TTL audio purging, domestic cloud residency (AWS `ap-south-1` & Exotel Mumbai). | [`docs/DATA_PRIVACY_AND_RESIDENCY.md`](file:///home/hari/code/python/define/docs/DATA_PRIVACY_AND_RESIDENCY.md), [`core/data_governance.py`](file:///home/hari/code/python/define/core/data_governance.py) | **Complete & Verified** |
 
 ---
 
@@ -71,7 +71,7 @@ flowchart TD
 
 # Architecture Decision Summary
 
-Full justification in [`ARCHITECTURE_DECISION.md`](file:///home/hari/code/python/define/ARCHITECTURE_DECISION.md).
+Full justification in [`docs/ARCHITECTURE_DECISION.md`](file:///home/hari/code/python/define/docs/ARCHITECTURE_DECISION.md).
 
 We evaluated four architectures:
 1. **Static Pre-recorded IVR**: Zero flexibility, high studio recording costs, rigid audio playback.
@@ -86,7 +86,7 @@ We evaluated four architectures:
 
 # Data Protection & Data Residency (DPDPA 2023 & HIPAA)
 
-Full governance policy documented in [`DATA_PRIVACY_AND_RESIDENCY.md`](file:///home/hari/code/python/define/DATA_PRIVACY_AND_RESIDENCY.md).
+Full governance policy documented in [`docs/DATA_PRIVACY_AND_RESIDENCY.md`](file:///home/hari/code/python/define/docs/DATA_PRIVACY_AND_RESIDENCY.md).
 
 - **Data Residency**: All voice processing, database storage, and transcript processing reside strictly in domestic data centers located in Mumbai, India:
   - Telephony Gateway: Exotel India (`api.in.exotel.com`, Mumbai SBC)
@@ -102,9 +102,12 @@ Full governance policy documented in [`DATA_PRIVACY_AND_RESIDENCY.md`](file:///h
 # Directory Structure
 
 ```
-├── ARCHITECTURE_DECISION.md         # Architecture decision record (ADR)
-├── DATA_PRIVACY_AND_RESIDENCY.md    # DPDPA 2023, HIPAA & data residency policy
-├── plan.md                          # Implementation progress tracker
+├── docs/                            # Platform Specifications & ADR Documentation
+│   ├── ARCHITECTURE_DECISION.md     # Architecture decision record (ADR)
+│   ├── DATA_PRIVACY_AND_RESIDENCY.md# DPDPA 2023, HIPAA & data residency policy
+│   ├── multilingual_outbound....md  # Original Hackathon Problem Statement
+│   └── plan.md                      # Implementation progress tracker
+│
 ├── test_platform.py                 # Comprehensive automated verification suite
 ├── campaign_contacts_sample.csv     # Multi-city seminar dataset (6+ languages, 5 segments)
 ├── clinic_contacts_sample.csv       # Healthcare appointment reminder dataset
@@ -118,13 +121,14 @@ Full governance policy documented in [`DATA_PRIVACY_AND_RESIDENCY.md`](file:///h
 │   ├── amd_engine.py                # Answering Machine Detection & compliant voicemail drops
 │   ├── data_governance.py           # AES-256-GCM crypto, masking & DPDPA erasure pipeline
 │   ├── analytics.py                 # KPI aggregation, segment breakdowns & retry manifests
-│   ├── platform.py                  # Core system orchestrator
+│   ├── orchestrator.py              # Core system orchestrator
 │   └── api_server.py                # FastAPI server with dark-mode web console
 │
-├── app-ui/                          # SvelteKit 5 Production Web Application
+├── app-ui/                          # SvelteKit 5 & Capacitor Android Application
+│   ├── android/                     # Native Capacitor Android Project
 │   ├── src/routes/(app)/dashboard/  # Interactive campaign dashboard with retry action
 │   ├── src/routes/api/analytics/    # Analytics API proxy
-│   └── src/routes/api/retry/        # 1-click retry non-responders API
+│   └── src/routes/api/calls/        # Test call dispatch API
 │
 └── elevenlabs/                      # ElevenLabs Conversational Voice Agent assets
 ```
