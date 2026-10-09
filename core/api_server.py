@@ -384,6 +384,24 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
                 "manifest": manifest
             })
 
+        elif path == "/api/calls/dispatch":
+            phone = payload.get("phone", "+919995283835")
+            name = payload.get("name", "Daison")
+            template = payload.get("template", "Sample Campaign Script")
+            
+            call_res = platform.telephony.initiate_voice_call(
+                phone_number=phone,
+                caller_id="+918045678900",
+                custom_text=template
+            )
+            self._send_json({
+                "status": "success",
+                "message": f"Test call dispatched to {phone}",
+                "target_phone": phone,
+                "recipient": name,
+                "call_details": call_res
+            })
+
         elif path == "/api/governance/erasure":
             phone = payload.get("phone", "")
             if not phone:
