@@ -8,6 +8,10 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
+import android.app.KeyguardManager;
+import android.content.Context;
+import android.os.Build;
+import android.view.WindowManager;
 import java.util.Arrays;
 
 public class MainActivity extends BridgeActivity {
@@ -15,6 +19,25 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(AutoDialerPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Keep screen on continuously while app is in foreground
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Allow app to show on top of keyguard and turn screen on
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null) {
+                km.requestDismissKeyguard(this, null);
+            }
+        } else {
+            getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD |
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            );
+        }
 
         String[] neededPermissions = new String[]{
             Manifest.permission.RECORD_AUDIO,
@@ -58,6 +81,20 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
             });
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null) {
+                km.requestDismissKeyguard(this, null);
+            }
         }
     }
 }

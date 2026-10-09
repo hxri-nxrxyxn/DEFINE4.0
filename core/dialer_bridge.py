@@ -38,13 +38,27 @@ def adb_cmd(cmd_list):
     except Exception as e:
         return ""
 
+def wake_screen():
+    # Wake up screen and dismiss keyguard
+    adb_cmd(["shell", "input", "keyevent", "224"]) # KEYCODE_WAKEUP
+    adb_cmd(["shell", "wm", "dismiss-keyguard"])
+
+def bring_app_to_front():
+    # Bring our app back to foreground immediately after call concludes
+    adb_cmd(["shell", "am", "start", "-n", "com.define.voiceai/.MainActivity", "--activity-brought-to-front"])
+
 def place_call(phone):
+    wake_screen()
     clean = re.sub(r"[^\d+]", "", phone)
     adb_cmd(["shell", "am", "start", "-a", "android.intent.action.CALL", "-d", f"tel:{clean}"])
 
 def end_call():
-    # Send KEYCODE_ENDCALL (6) to hang up
-    adb_cmd(["shell", "input", "keyevent", "6"])
+    # Telecom end call via adb telecom or KEYCODE_ENDCALL (6)
+    res = adb_cmd(["shell", "telecom", "end-call"])
+    if not res or "error" in res.lower():
+        adb_cmd(["shell", "input", "keyevent", "6"])
+    wake_screen()
+    bring_app_to_front()
 
 def get_telecom_dump():
     return adb_cmd(["shell", "dumpsys", "telecom"])
@@ -178,6 +192,8 @@ def monitor_call_cycle(phone, name, duration_sec, native_dialed=False):
 
         if "SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk or not has_active:
             print(f"[+] Call ended early by recipient after {elapsed}s active duration.", flush=True)
+            wake_screen()
+            bring_app_to_front()
             current_call_status["call_state"] = "COMPLETED"
             current_call_status["outcome"] = "completed"
             current_call_status["active"] = False

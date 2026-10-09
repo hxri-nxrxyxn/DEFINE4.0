@@ -142,6 +142,24 @@ public class AutoDialerPlugin extends Plugin {
                 ended = true;
             } catch (Throwable ignore) {}
         }
+
+        // Immediately re-assert screen wakefulness and return focus to MainActivity
+        try {
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            getActivity().getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                            Intent bringToFront = new Intent(getContext(), MainActivity.class);
+                            bringToFront.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                            getContext().startActivity(bringToFront);
+                        } catch (Throwable ignored) {}
+                    }
+                });
+            }
+        } catch (Throwable ignored) {}
+
         return ended;
     }
 
