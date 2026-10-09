@@ -73,6 +73,11 @@ class CampaignStore {
 		this.recipients = recipients;
 	}
 
+	clearRecipients() {
+		this.csvName = '';
+		this.recipients = [];
+	}
+
 	reset() {
 		this.templateText = '';
 		this.tested = false;

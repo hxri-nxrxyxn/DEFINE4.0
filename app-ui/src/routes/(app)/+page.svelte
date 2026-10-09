@@ -50,6 +50,22 @@
 		isEditingRoster = true;
 	}
 
+	function deleteRoster() {
+		campaign.clearRecipients();
+		contactRows = [
+			{ name: 'Daison', phone: '9995283835', language: 'Hindi' },
+			{ name: 'Rahul', phone: '9876543210', language: 'Tamil' }
+		];
+		isEditingRoster = false;
+		showModal = false;
+		toast.success('Roster deleted');
+	}
+
+	function clearAllRows() {
+		contactRows = [{ name: '', phone: '', language: 'Hindi' }];
+		toast.info('All rows cleared');
+	}
+
 	function saveRoster() {
 		const valid = contactRows.filter((r) => r.name.trim() || r.phone.trim());
 		if (valid.length === 0) {
@@ -143,9 +159,20 @@
 							</Card.Description>
 						</div>
 					</div>
-					<Button variant="ghost" size="icon-sm" onclick={() => (showModal = false)}>
-						<X class="size-4" />
-					</Button>
+					<div class="flex items-center gap-1">
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							class="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+							onclick={deleteRoster}
+							title="Delete entire roster"
+						>
+							<Trash2 class="size-4" />
+						</Button>
+						<Button variant="ghost" size="icon-sm" onclick={() => (showModal = false)}>
+							<X class="size-4" />
+						</Button>
+					</div>
 				</Card.Header>
 
 				<Card.Content class="pt-1 px-4 pb-3">
@@ -180,24 +207,33 @@
 				</Card.Content>
 
 				<Card.Footer class="flex items-center justify-between border-t border-border py-2.5 px-4 bg-muted/10">
-					<div class="flex items-center gap-2">
+					<div class="flex items-center gap-1">
+						<Button
+							variant="ghost"
+							size="sm"
+							class="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1.5"
+							onclick={deleteRoster}
+						>
+							<Trash2 class="size-3.5" />
+							Delete
+						</Button>
 						{#if campaign.csvName === 'Contact Roster'}
 							<Button
 								variant="ghost"
 								size="sm"
-								class="text-xs text-muted-foreground hover:text-foreground h-8 px-2.5"
+								class="text-xs text-muted-foreground hover:text-foreground h-8 px-2"
 								onclick={editManualRoster}
 							>
-								Edit Roster
+								Edit
 							</Button>
 						{/if}
 						<Button
 							variant="ghost"
 							size="sm"
-							class="text-xs text-muted-foreground hover:text-foreground h-8 px-2.5"
+							class="text-xs text-muted-foreground hover:text-foreground h-8 px-2"
 							onclick={() => fileInput.click()}
 						>
-							Upload New CSV
+							Replace
 						</Button>
 					</div>
 					<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs" onclick={() => (showModal = false)}>
@@ -269,13 +305,24 @@
 					</div>
 				</Card.Content>
 
-				<Card.Footer class="flex justify-end gap-2 border-t border-border py-2.5 px-4 bg-muted/10">
-					<Button variant="outline" size="sm" class="rounded-xl h-8 text-xs" onclick={() => (showModal = false)}>
-						Cancel
+				<Card.Footer class="flex items-center justify-between border-t border-border py-2.5 px-4 bg-muted/10">
+					<Button
+						variant="ghost"
+						size="sm"
+						class="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2 gap-1"
+						onclick={clearAllRows}
+					>
+						<Trash2 class="size-3.5" />
+						Clear All
 					</Button>
-					<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs" onclick={saveRoster}>
-						Save Recipients
-					</Button>
+					<div class="flex items-center gap-2">
+						<Button variant="outline" size="sm" class="rounded-xl h-8 text-xs" onclick={() => (showModal = false)}>
+							Cancel
+						</Button>
+						<Button variant="default" size="sm" class="rounded-xl px-4 h-8 text-xs" onclick={saveRoster}>
+							Save Recipients
+						</Button>
+					</div>
 				</Card.Footer>
 			{/if}
 		</Card.Root>
