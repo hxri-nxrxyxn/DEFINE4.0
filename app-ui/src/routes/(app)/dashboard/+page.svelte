@@ -65,10 +65,13 @@
 					confirmationRatePct = Math.round(data.kpis.confirmation_rate_pct ?? 46);
 				}
 				if (data.by_language) {
+					const langCodeMap: Record<string, string> = {
+						Hindi: 'hi', Tamil: 'ta', Telugu: 'te', Marathi: 'mr', Malayalam: 'ml', Bengali: 'bn', Kannada: 'kn', English: 'en'
+					};
 					const colors = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
 					const entries = Object.entries(data.by_language);
 					languageData = entries.map(([name, stat]: [string, any], idx) => ({
-						key: name.toLowerCase().slice(0, 2),
+						key: langCodeMap[name] || name.toLowerCase(),
 						label: name,
 						value: stat.confirmed || stat.total || 0,
 						color: colors[idx % colors.length]
@@ -210,7 +213,7 @@
 					</PieChart>
 				</Chart.Container>
 				<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-					{#each languageData as item (item.key)}
+					{#each languageData as item (item.label)}
 						<div class="flex items-center gap-2">
 							<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {item.color}"></span>
 							<span class="text-muted-foreground">{item.label}</span>
