@@ -200,8 +200,8 @@
 											<td class="py-2.5 px-3 align-middle text-xs font-medium text-foreground tracking-tight truncate" title={recipient.name}>
 												{recipient.name}
 											</td>
-											<td class="py-2.5 px-2 align-middle text-xs font-mono text-muted-foreground truncate" title={recipient.phone}>
-												{recipient.phone}
+											<td class="py-2.5 px-2 align-middle text-xs font-mono text-muted-foreground truncate" title={campaign.hipaaCompliant ? recipient.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : recipient.phone}>
+												{campaign.hipaaCompliant ? recipient.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : recipient.phone}
 											</td>
 											<td class="py-2.5 px-2 align-middle text-left text-xs text-muted-foreground font-normal truncate" title={recipient.language}>
 												{recipient.language || 'Hindi'}

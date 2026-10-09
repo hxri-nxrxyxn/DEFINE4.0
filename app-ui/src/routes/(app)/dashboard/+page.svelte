@@ -20,6 +20,9 @@
 	import Pause from '@lucide/svelte/icons/pause';
 	import Play from '@lucide/svelte/icons/play';
 	import Square from '@lucide/svelte/icons/square';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import PhoneMissed from '@lucide/svelte/icons/phone-missed';
+	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { toast } from 'svelte-sonner';
 
 	let loading = $state(true);
@@ -27,7 +30,7 @@
 
 	let fetchedStats = $state([
 		{ label: 'Calls placed', value: '0' },
-		{ label: 'Queued retries', value: '0' }
+		{ label: 'Non-responders', value: '0' }
 	]);
 
 	let fetchedConnectRate = $state(0);
@@ -62,7 +65,7 @@
 		hasLocal
 			? [
 					{ label: 'Calls placed', value: String(attempted) },
-					{ label: 'Queued retries', value: String(campaign.retryList.length) }
+					{ label: 'Non-responders', value: String(campaign.nonResponders.length) }
 				]
 			: fetchedStats
 	);
@@ -91,20 +94,22 @@
 
 	const retries = $derived(
 		hasLocal
-			? campaign.retryList.map((r) => ({
+			? campaign.nonResponders.map((r) => ({
+					name: r.name,
 					phone: r.phone,
-					campaign: r.name,
+					language: r.language || 'Hindi',
+					disposition: campaign.outcomes[r.phone]?.disposition || 'no_response',
 					count: campaign.outcomes[r.phone]?.attempts ?? 1
 				}))
 			: []
 	);
 
 	const OUTCOME_META: Record<string, { label: string; class: string }> = {
-		confirmed: { label: 'Confirmed', class: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+		confirmed: { label: 'Confirmed (10s)', class: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
 		declined: { label: 'Declined', class: 'bg-rose-500/15 text-rose-600 dark:text-rose-400' },
 		not_available: { label: 'Not available', class: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
 		opt_out: { label: 'Opted out', class: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400' },
-		no_response: { label: 'No response', class: 'bg-muted text-muted-foreground' }
+		no_response: { label: 'Non-responder', class: 'bg-muted text-muted-foreground' }
 	};
 
 	// Recipients who have been called this session, most recent first.
@@ -125,12 +130,21 @@
 	let lastDialTimestamp = 0;
 	let callRegisteredActive = false;
 
+	const HIPAA_DISCLAIMER_PREFIX =
+		"Notice: Under ABDM and DPDP healthcare rules, this call is processed securely by AI. Number masking is active, carrier recordings are purged, and data is kept in Indian datacenters. Your ABHA number will never be shared. By continuing, you agree to voice data processing.";
+
 	function formatScriptForRecipient(template: string, name: string): string {
-		if (!template) return `Hello ${name}, this is an automated IVR call.`;
-		return template
-			.replace(/{name}/gi, name)
-			.replace(/\{recipient\}/gi, name)
-			.replace(/\b(Daison|Hari|Rahul|User)\b/gi, name);
+		const base = template
+			? template
+					.replace(/{name}/gi, name)
+					.replace(/\{recipient\}/gi, name)
+					.replace(/\b(Daison|Hari|Rahul|User)\b/gi, name)
+			: `Hello ${name}, this is an automated IVR call.`;
+
+		if (campaign.hipaaCompliant) {
+			return `${HIPAA_DISCLAIMER_PREFIX} ${base}`;
+		}
+		return base;
 	}
 
 	async function runAutoDialerLoop() {
@@ -219,15 +233,28 @@
 			// Condition A: status.call_state is explicitly 'COMPLETED' (reported by bridge)
 			// Condition B: call was registered active and has now ended (!status.active)
 			// Condition C: call was dialing and has ended after waiting at least 6 seconds without answering
+			const callStateStr = status.call_state as string;
 			const isConcluded =
-				status.call_state === 'COMPLETED' ||
-				(callRegisteredActive && !status.active) ||
+				callStateStr === 'COMPLETED' ||
+				(callRegisteredActive && !status.active && callStateStr !== 'CONNECTED') ||
 				(campaign.currentCallStatus === 'dialing' && !status.active && timeSinceDial > 6.0);
 
 			if (isConcluded) {
 				isExecutingStep = true;
 				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
+
+				let disposition: 'confirmed' | 'declined' | 'no_response' = 'no_response';
+				if (outcome === 'completed') {
+					disposition = 'confirmed';
+				} else if (outcome === 'declined') {
+					disposition = 'declined';
+				} else {
+					disposition = 'no_response';
+				}
+
+				// Record in campaign store outcomes for analytical tracking & non-responder list
+				campaign.recordOutcome(current.phone, disposition);
 
 				if (campaign.callLogs[0]) {
 					campaign.callLogs[0].status = outcome === 'completed' ? 'completed' : 'failed';
@@ -238,9 +265,13 @@
 					toast.success(`Completed call with ${current.name}`, {
 						description: `10s active duration met. Advancing to next contact...`
 					});
+				} else if (outcome === 'declined') {
+					toast.info(`Call declined: ${current.name}`, {
+						description: `Call was declined by recipient. Added to non-responders list.`
+					});
 				} else {
-					toast.info(`Call ended with ${current.name}`, {
-						description: `Call declined or disconnected (${finalDuration}s). Advancing to next contact...`
+					toast.info(`No response from ${current.name}`, {
+						description: `Auto-terminated after timeout. Added to non-responders list.`
 					});
 				}
 
@@ -417,7 +448,14 @@
 					</div>
 
 					<div class="rounded-lg border border-border bg-card/60 p-2.5">
-						<div class="text-muted-foreground text-[11px]">Active Target</div>
+						<div class="flex items-center justify-between text-muted-foreground text-[11px]">
+							<span>Active Target</span>
+							{#if campaign.hipaaCompliant}
+								<span class="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded">
+									HIPAA
+								</span>
+							{/if}
+						</div>
 						<div class="font-semibold text-foreground mt-0.5 text-xs truncate" title={campaign.currentCallName}>
 							{campaign.currentCallName || campaign.recipients[campaign.currentCallIndex]?.name || 'Pending'}
 						</div>
@@ -515,7 +553,7 @@
 								<Table.Cell>
 									<div class="font-medium text-foreground">{entry.recipient.name}</div>
 									<div class="text-[11px] font-mono text-muted-foreground">
-										{entry.recipient.phone}
+										{campaign.hipaaCompliant ? entry.recipient.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : entry.recipient.phone}
 										{#if entry.outcome}
 											· {formatTime(entry.outcome.at)}
 										{/if}
@@ -548,23 +586,50 @@
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="text-base">Retry non-responders</Card.Title>
-			<Card.Description>Calls pending a second attempt.</Card.Description>
+			<div class="flex items-center justify-between">
+				<div>
+					<Card.Title class="text-base font-semibold">Non-Responders</Card.Title>
+					<Card.Description class="text-xs">
+						Contacts who declined, timed out, or did not answer.
+					</Card.Description>
+				</div>
+				{#if retries.length > 0}
+					<Badge variant="secondary" class="h-5 px-2 text-[11px] font-medium tabular-nums">
+						{retries.length} queued
+					</Badge>
+				{/if}
+			</div>
 		</Card.Header>
-		<Card.Content class="space-y-3">
+		<Card.Content class="space-y-2.5">
 			{#if retries.length > 0}
 				{#each retries as item (item.phone)}
-					<div class="flex items-center justify-between gap-3">
-						<div class="flex items-center gap-2">
-							<Voicemail class="size-4 text-muted-foreground" />
-							<span class="text-sm">{item.campaign}</span>
+					<div class="flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-card/60 p-2.5 text-xs">
+						<div class="flex items-center gap-2.5 min-w-0">
+							<div class="grid size-7 place-items-center rounded-md bg-muted text-muted-foreground shrink-0">
+								<PhoneMissed class="size-3.5 text-rose-500" />
+							</div>
+							<div class="min-w-0 truncate">
+								<div class="font-medium text-foreground truncate">{item.name}</div>
+								<div class="text-[11px] font-mono text-muted-foreground truncate">
+									{campaign.hipaaCompliant ? item.phone.replace(/(\d{2})\d{5}(\d{3})/, '$1•••••$2') : item.phone} · {item.language}
+								</div>
+							</div>
 						</div>
-						<span class="text-sm tabular-nums text-muted-foreground">{item.count}</span>
+						<div class="flex items-center gap-2 shrink-0">
+							<span
+								class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium {OUTCOME_META[item.disposition]?.class ?? 'bg-muted text-muted-foreground'}"
+							>
+								{OUTCOME_META[item.disposition]?.label ?? item.disposition}
+							</span>
+							<span class="text-[11px] font-mono text-muted-foreground" title="Attempt count">
+								x{item.count}
+							</span>
+						</div>
 					</div>
 				{/each}
 			{:else}
-				<div class="py-2 text-center text-xs text-muted-foreground">
-					No pending retries.
+				<div class="py-4 text-center text-xs text-muted-foreground">
+					No non-responders detected. All calls connected or roster pending.
 				</div>
 			{/if}
 		</Card.Content>

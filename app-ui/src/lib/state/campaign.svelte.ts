@@ -35,6 +35,7 @@ type PersistedState = {
 	recipients: Recipient[];
 	outcomes: Record<string, CallOutcome>;
 	activePhone: string;
+	hipaaCompliant?: boolean;
 };
 
 const DEFAULTS: PersistedState = {
@@ -44,7 +45,8 @@ const DEFAULTS: PersistedState = {
 	csvName: '',
 	recipients: [],
 	outcomes: {},
-	activePhone: ''
+	activePhone: '',
+	hipaaCompliant: false
 };
 
 function read(): PersistedState {
@@ -65,6 +67,9 @@ class CampaignStore {
 	// The roster is only ever replaced wholesale, so `$state.raw` avoids the
 	// cost of deeply proxying large CSV imports.
 	recipients = $state.raw<Recipient[]>([]);
+
+	// HIPAA / ABDM / DPDP Compliance Toggle
+	hipaaCompliant = $state(false);
 
 	// IVR Auto-Dialer Roster Campaign Execution State
 	isCampaignRunning = $state(false);
@@ -87,11 +92,19 @@ class CampaignStore {
 		this.recipients.find((r) => r.phone === this.activePhone) ?? this.recipients[0] ?? null
 	);
 
-	/** Recipients that need another attempt (no answer / not available). */
+	/** Recipients who did not answer, declined, or timed out / auto-terminated without completion */
+	nonResponders = $derived(
+		this.recipients.filter((r) => {
+			const d = this.outcomes[r.phone]?.disposition;
+			return d === 'no_response' || d === 'not_available' || d === 'declined';
+		})
+	);
+
+	/** Recipients that need another attempt (no answer / not available / declined). */
 	retryList = $derived(
 		this.recipients.filter((r) => {
 			const d = this.outcomes[r.phone]?.disposition;
-			return d === 'no_response' || d === 'not_available';
+			return d === 'no_response' || d === 'not_available' || d === 'declined';
 		})
 	);
 
@@ -125,6 +138,7 @@ class CampaignStore {
 		this.recipients = saved.recipients;
 		this.outcomes = saved.outcomes ?? {};
 		this.activePhone = saved.activePhone ?? '';
+		this.hipaaCompliant = Boolean(saved.hipaaCompliant);
 
 		$effect.root(() => {
 			$effect(() => {
@@ -137,6 +151,7 @@ class CampaignStore {
 				void this.recipients;
 				void this.outcomes;
 				void this.activePhone;
+				void this.hipaaCompliant;
 				this.#scheduleSave();
 			});
 		});
@@ -152,7 +167,8 @@ class CampaignStore {
 				csvName: this.csvName,
 				recipients: $state.snapshot(this.recipients),
 				outcomes: $state.snapshot(this.outcomes),
-				activePhone: this.activePhone
+				activePhone: this.activePhone,
+				hipaaCompliant: this.hipaaCompliant
 			};
 			try {
 				sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));

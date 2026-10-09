@@ -10,6 +10,8 @@
 	import Menu from '@lucide/svelte/icons/menu';
 	import Moon from '@lucide/svelte/icons/moon';
 	import Settings from '@lucide/svelte/icons/settings';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { campaign } from '#lib/state/campaign.svelte.js';
 	import { mode, setMode } from 'mode-watcher';
 	import type { LayoutProps } from './$types';
 
@@ -107,7 +109,7 @@
 					<Sheet.Description class="sr-only">App preferences</Sheet.Description>
 				</div>
 
-				<div class="px-4 py-4">
+				<div class="space-y-3 px-4 py-4">
 					<label
 						class="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-3 py-3"
 					>
@@ -119,6 +121,23 @@
 							checked={isDark}
 							onCheckedChange={(checked) => setMode(checked ? 'dark' : 'light')}
 							aria-label="Toggle dark mode"
+						/>
+					</label>
+
+					<label
+						class="flex items-center justify-between gap-3 rounded-xl border border-border/60 bg-card px-3 py-3"
+					>
+						<div class="space-y-0.5">
+							<span class="flex items-center gap-2 text-sm font-medium">
+								<ShieldCheck class="size-4 text-emerald-500" />
+								HIPAA Compliance
+							</span>
+							<p class="text-[11px] text-muted-foreground">ABDM/DPDP consent, number masking</p>
+						</div>
+						<Switch
+							checked={campaign.hipaaCompliant}
+							onCheckedChange={(checked) => (campaign.hipaaCompliant = checked)}
+							aria-label="Toggle HIPAA compliancy"
 						/>
 					</label>
 				</div>
