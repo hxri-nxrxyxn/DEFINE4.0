@@ -111,14 +111,9 @@
 						<ShieldCheck class="size-4" />
 					</div>
 					<div class="space-y-0.5">
-						<div class="flex items-center gap-2">
-							<span class="text-sm font-semibold tracking-tight text-foreground">HIPAA / DPDP Compliancy</span>
-							{#if campaign.hipaaCompliant}
-								<Badge variant="default" class="h-4 px-1.5 text-[10px] font-medium bg-emerald-600 text-white">
-									Active
-								</Badge>
-							{/if}
-						</div>
+						<h3 class="text-sm font-semibold tracking-tight text-foreground">
+							HIPAA / DPDP Compliancy
+						</h3>
 						<p class="text-xs text-muted-foreground leading-normal">
 							Enforce ABDM consent, number masking, and Indian DC residency.
 						</p>
@@ -141,30 +136,19 @@
 			</div>
 
 			{#if campaign.hipaaCompliant}
-				<div class="rounded-lg border border-primary/20 bg-primary/5 p-2.5 space-y-2 text-xs animate-in fade-in">
+				<div class="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2.5 text-xs animate-in fade-in">
 					<div class="flex items-center gap-1.5 font-medium text-primary text-[11px] uppercase tracking-wider">
 						<Lock class="size-3" /> Mandatory ABDM / DPDP IVR Consent Intro
 					</div>
-					<p class="text-xs italic text-foreground/90 leading-relaxed bg-background/60 p-2 rounded-md border border-border/50">
+					<p class="text-xs italic text-foreground/90 leading-relaxed bg-background/60 p-2.5 rounded-md border border-border/50">
 						"{HIPAA_DISCLAIMER_TEXT}"
 					</p>
-					<div class="grid grid-cols-2 gap-2 pt-1 text-[11px] text-muted-foreground">
-						<div class="flex items-center gap-1.5">
-							<span class="size-1.5 rounded-full bg-emerald-500"></span>
-							<span>Number Masking (99••• ••835)</span>
-						</div>
-						<div class="flex items-center gap-1.5">
-							<span class="size-1.5 rounded-full bg-emerald-500"></span>
-							<span>No Exotel Carrier Recordings</span>
-						</div>
-						<div class="flex items-center gap-1.5">
-							<span class="size-1.5 rounded-full bg-emerald-500"></span>
-							<span>Indian Datacenter (ap-south-1)</span>
-						</div>
-						<div class="flex items-center gap-1.5">
-							<span class="size-1.5 rounded-full bg-emerald-500"></span>
-							<span>ABHA Number Guarded</span>
-						</div>
+					<div class="space-y-1 pt-1 border-t border-border/40 text-xs text-muted-foreground">
+						<div class="leading-relaxed">Number masking active on UI and telephony logs</div>
+						<div class="leading-relaxed">Zero telecom recordings retained on external carrier gateways</div>
+						<div class="leading-relaxed">Data hosted and processed strictly in Indian datacenters (ap-south-1)</div>
+						<div class="leading-relaxed">ABHA numbers strictly guarded and never disclosed</div>
+						<div class="leading-relaxed">Explicit consent mandatory prior to IVR processing</div>
 					</div>
 				</div>
 			{/if}
