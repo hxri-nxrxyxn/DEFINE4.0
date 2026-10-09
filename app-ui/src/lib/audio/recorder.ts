@@ -37,6 +37,9 @@ export async function startRecording(options: StartRecordingOptions): Promise<Re
 
 	let stream: MediaStream;
 	try {
+		if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+			throw new Error('Microphone access is not supported in this browser or environment.');
+		}
 		stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 	} catch (error) {
 		onError?.(error);

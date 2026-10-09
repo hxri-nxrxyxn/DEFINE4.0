@@ -41,6 +41,9 @@
 					recognition.continuous = true;
 					recognition.interimResults = true;
 					recognition.lang = 'en-US';
+					recognition.onerror = (err: any) => {
+						console.warn('SpeechRecognition error:', err);
+					};
 					recognition.onresult = (event: any) => {
 						let text = '';
 						for (let i = 0; i < event.results.length; i++) {
