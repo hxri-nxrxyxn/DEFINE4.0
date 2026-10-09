@@ -176,21 +176,27 @@
 					campaign.callLogs[0].status = 'connected';
 					campaign.callLogs[0].durationSeconds = status.elapsed_seconds;
 				}
-			} else if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'dialing')) {
-				// Call finished (either 10s elapsed or hung up by recipient)
+			} else if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'idle')) {
+				// Call finished (either 10s elapsed, declined, or hung up)
+				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
+				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
+
 				if (campaign.callLogs[0]) {
-					campaign.callLogs[0].status = 'completed';
-					campaign.callLogs[0].durationSeconds = Math.max(
-						campaign.currentCallDurationSec,
-						status.elapsed_seconds || 10
-					);
+					campaign.callLogs[0].status = outcome === 'completed' ? 'completed' : 'failed';
+					campaign.callLogs[0].durationSeconds = finalDuration;
 				}
 
-				toast.success(`Completed call with ${current.name}`, {
-					description: `10s active duration met. Advancing to next contact...`
-				});
+				if (outcome === 'completed') {
+					toast.success(`Completed call with ${current.name}`, {
+						description: `10s active duration met. Advancing to next contact...`
+					});
+				} else {
+					toast.info(`Call ended with ${current.name}`, {
+						description: `Call declined or disconnected (${finalDuration}s). Advancing to next contact...`
+					});
+				}
 
-				// Move to next contact in roster
+				// Advance to the next contact in the roster
 				campaign.currentCallIndex++;
 				campaign.currentCallDurationSec = 0;
 				campaign.currentCallStatus = 'idle';

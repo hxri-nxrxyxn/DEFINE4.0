@@ -4,6 +4,7 @@ DEFINE Auto-Dialer & Telephony Bridge Daemon
 ===========================================
 Monitors ADB telecom states, triggers calls on device, detects recipient pickup (SET_ACTIVE),
 and terminates the call precisely after the designated connected duration (10s from pickup).
+Handles early hang-ups, call declines, and busy states gracefully.
 """
 
 import http.server
@@ -25,6 +26,7 @@ current_call_status = {
     "connected_time": None,
     "elapsed_seconds": 0,
     "target_duration": 10,
+    "outcome": None,      # completed, declined, unanswered, error
     "last_error": None
 }
 
@@ -41,18 +43,32 @@ def place_call(phone):
     adb_cmd(["shell", "am", "start", "-a", "android.intent.action.CALL", "-d", f"tel:{clean}"])
 
 def end_call():
-    # Send KEYCODE_ENDCALL (6) to immediately hang up
+    # Send KEYCODE_ENDCALL (6) to hang up
     adb_cmd(["shell", "input", "keyevent", "6"])
 
 def get_telecom_dump():
     return adb_cmd(["shell", "dumpsys", "telecom"])
 
-def get_audio_mode():
-    out = adb_cmd(["shell", "dumpsys", "audio"])
-    for line in out.splitlines():
-        if "Actual mode =" in line:
-            return line.strip()
-    return ""
+def extract_latest_call_info(dump):
+    """
+    Returns (call_id_int, call_chunk_str, has_active_call_in_manager)
+    """
+    # Check if CallsManager has active calls
+    has_active = False
+    idx_calls = dump.find("mCalls:")
+    idx_audio = dump.find("mCallAudioManager:")
+    if idx_calls != -1 and idx_audio != -1 and idx_audio > idx_calls:
+        mcalls_section = dump[idx_calls+7:idx_audio].strip()
+        if len(mcalls_section) > 0:
+            has_active = True
+
+    matches = list(re.finditer(r"CallTC@(\d+)", dump))
+    if not matches:
+        return None, "", has_active
+    last = matches[-1]
+    call_num = int(last.group(1))
+    chunk = dump[last.start():]
+    return call_num, chunk, has_active
 
 def monitor_call_cycle(phone, name, duration_sec):
     global current_call_status
@@ -63,48 +79,89 @@ def monitor_call_cycle(phone, name, duration_sec):
     current_call_status["connected_time"] = None
     current_call_status["elapsed_seconds"] = 0
     current_call_status["target_duration"] = duration_sec
+    current_call_status["outcome"] = None
     current_call_status["last_error"] = None
 
-    print(f"[*] Placing call to {name} ({phone}), target active duration: {duration_sec}s", flush=True)
+    # Snapshot current call ID prior to placement
+    initial_dump = get_telecom_dump()
+    initial_call_num, _, _ = extract_latest_call_info(initial_dump)
+
+    print(f"[*] Placing call to {name} ({phone}) (previous call_id: {initial_call_num})", flush=True)
     place_call(phone)
 
-    # Wait for call to either become active (answered) or be ended/canceled
     dial_start = time.time()
+    call_num = None
+    target_chunk = ""
+    max_wait_to_register = 8.0 # seconds for CallTC to be created
+
+    # Phase 1: Wait for new CallTC to appear in telecom manager
+    while time.time() - dial_start < max_wait_to_register:
+        time.sleep(0.4)
+        dump = get_telecom_dump()
+        c_num, chunk, _ = extract_latest_call_info(dump)
+        if c_num is not None and (initial_call_num is None or c_num > initial_call_num):
+            call_num = c_num
+            target_chunk = chunk
+            print(f"[+] New call identified: CallTC@{call_num}", flush=True)
+            break
+
+    # If call didn't register a new number, fall back to latest known
+    if call_num is None:
+        c_num, chunk, _ = extract_latest_call_info(get_telecom_dump())
+        call_num = c_num
+        target_chunk = chunk
+
+    # Phase 2: Wait for call to either be answered (SET_ACTIVE) or ended (declined/unanswered)
     call_connected = False
-    max_ring_time = 50 # seconds before giving up
+    max_ring_time = 45.0 # seconds
 
     while time.time() - dial_start < max_ring_time:
-        time.sleep(0.6)
+        time.sleep(0.5)
         dump = get_telecom_dump()
-        audio = get_audio_mode()
-        
-        last_idx = dump.rfind("CallTC@")
-        chunk = dump[last_idx:] if last_idx != -1 else ""
+        c_num, chunk, has_active = extract_latest_call_info(dump)
 
-        # Check if call is answered (SET_ACTIVE in chunk)
-        if "SET_ACTIVE" in chunk:
+        # Match chunk corresponding to our call
+        if c_num == call_num:
+            target_chunk = chunk
+        elif c_num and call_num and c_num > call_num:
+            # Another call occurred
+            target_chunk = chunk
+
+        # Check if call answered
+        if "SET_ACTIVE" in target_chunk:
             call_connected = True
             current_call_status["call_state"] = "CONNECTED"
             current_call_status["connected_time"] = time.time()
-            print(f"[+] Call to {phone} ANSWERED! Starting {duration_sec}s countdown from pickup.", flush=True)
+            print(f"[+] Call to {phone} ANSWERED (SET_ACTIVE)! Beginning {duration_sec}s timer from pickup.", flush=True)
             break
-        
-        # Check if call was disconnected before answer (rejected, busy, user cancelled)
-        if "SET_DISCONNECTED" in chunk or "DESTROYED" in chunk:
-            if "MODE_NORMAL" in audio and (time.time() - dial_start > 3):
-                print(f"[-] Call to {phone} was ended/declined before answer.", flush=True)
+
+        # Check if call was disconnected or declined before answer
+        if "SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk:
+            # Check elapsed dial time to avoid initial false-positive
+            if time.time() - dial_start > 2.0:
+                print(f"[-] Call to {phone} was declined / ended before pickup.", flush=True)
                 current_call_status["call_state"] = "COMPLETED"
+                current_call_status["outcome"] = "declined"
                 current_call_status["active"] = False
                 return
 
+        # Fallback check if manager has no active call after dialing started
+        if not has_active and time.time() - dial_start > 4.0:
+            print(f"[-] No active call in Telecom Manager. Call declined/ended.", flush=True)
+            current_call_status["call_state"] = "COMPLETED"
+            current_call_status["outcome"] = "declined"
+            current_call_status["active"] = False
+            return
+
     if not call_connected:
-        print(f"[-] Call timed out without answer ({phone}). Terminating.", flush=True)
+        print(f"[-] Ring timed out for {phone}. Hanging up...", flush=True)
         end_call()
         current_call_status["call_state"] = "COMPLETED"
+        current_call_status["outcome"] = "unanswered"
         current_call_status["active"] = False
         return
 
-    # Count down the exact seconds from pickup
+    # Phase 3: Connected - Count down exact seconds from pickup
     conn_start = time.time()
     while time.time() - conn_start < duration_sec:
         elapsed = round(time.time() - conn_start, 1)
@@ -113,22 +170,26 @@ def monitor_call_cycle(phone, name, duration_sec):
 
         # Check if recipient hung up early
         dump = get_telecom_dump()
-        last_idx = dump.rfind("CallTC@")
-        chunk = dump[last_idx:] if last_idx != -1 else ""
-        if "SET_DISCONNECTED" in chunk or "DESTROYED" in chunk:
-            print(f"[+] Call ended early by recipient after {elapsed}s.", flush=True)
+        c_num, chunk, has_active = extract_latest_call_info(dump)
+        if c_num == call_num:
+            target_chunk = chunk
+
+        if "SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk or not has_active:
+            print(f"[+] Call ended early by recipient after {elapsed}s active duration.", flush=True)
             current_call_status["call_state"] = "COMPLETED"
+            current_call_status["outcome"] = "completed"
             current_call_status["active"] = False
             return
 
-    # Time reached! Automatically terminate call
-    print(f"[*] {duration_sec}s active call duration elapsed! Hanging up call to {phone}...", flush=True)
+    # Phase 4: Timer reached! Automatically terminate call from our end
+    print(f"[*] {duration_sec}s connected timer reached! Automatically hanging up call to {phone}...", flush=True)
     current_call_status["call_state"] = "DISCONNECTING"
     end_call()
     time.sleep(1.0)
     current_call_status["call_state"] = "COMPLETED"
+    current_call_status["outcome"] = "completed"
     current_call_status["active"] = False
-    print(f"[✓] Call to {name} ({phone}) completed.", flush=True)
+    print(f"[✓] Call to {name} ({phone}) successfully concluded.", flush=True)
 
 class BridgeServer(http.server.BaseHTTPRequestHandler):
     def _send_json(self, data, code=200):
