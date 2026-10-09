@@ -65,16 +65,25 @@
 		agentResponseText = '';
 
 		try {
-			// Configure the shared agent from the /template script before dialing.
-			await fetch('/api/convai/configure', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					script: cleanScript(campaign.templateText),
-					name: contactName,
-					language: contactLanguage
-				})
-			}).catch(() => {});
+			// Configure the shared agent from the /template script before dialing (best effort).
+			for (const base of ['http://localhost:8765', 'http://10.80.0.48:8765', '']) {
+				try {
+					const ep = base ? `${base}/api/convai/configure` : '/api/convai/configure';
+					await fetch(ep, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							script: cleanScript(campaign.templateText),
+							name: contactName,
+							language: contactLanguage
+						}),
+						signal: AbortSignal.timeout(1500)
+					});
+					break;
+				} catch {
+					// continue
+				}
+			}
 
 			convSession = await startConvAISession(
 				{

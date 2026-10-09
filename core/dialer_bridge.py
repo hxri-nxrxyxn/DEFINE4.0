@@ -209,6 +209,20 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/status" or self.path == "/":
             self._send_json(current_call_status)
+        elif self.path == "/api/convai/signed_url":
+            try:
+                import urllib.request
+                api_key = os.environ.get("ELEVENLABS_API_KEY", "sk_d9191a981f7ddca619f2dd4b1787e0cf6fd2e65a3c485e8a")
+                agent_id = os.environ.get("ELEVENLABS_AGENT_ID", "agent_8901m4gnv2a6f7xb5n0sbgbznz9f")
+                req = urllib.request.Request(
+                    f"https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id={agent_id}",
+                    headers={"xi-api-key": api_key}
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode())
+                    self._send_json(data)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
         else:
             self._send_json({"error": "not found"}, 404)
 
@@ -242,6 +256,9 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             current_call_status["active"] = False
             current_call_status["call_state"] = "COMPLETED"
             self._send_json({"status": "ended"})
+
+        elif self.path == "/api/convai/configure":
+            self._send_json({"ok": True})
         else:
             self._send_json({"error": "not found"}, 404)
 

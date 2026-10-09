@@ -73,9 +73,50 @@ export async function startConvAISession(
 ): Promise<ConvAISession> {
 	const silenceTimeoutMs = options.silenceTimeoutMs ?? 15000;
 
-	// 1. Get signed URL from backend
-	const res = await fetch('/api/convai/signed_url');
-	const { signed_url } = await res.json();
+	// 1. Get signed URL from backend or bridge
+	let signed_url = '';
+	const endpoints = [
+		'http://localhost:8765/api/convai/signed_url',
+		'http://10.80.0.48:8765/api/convai/signed_url',
+		'/api/convai/signed_url'
+	];
+
+	for (const ep of endpoints) {
+		try {
+			const res = await fetch(ep, { signal: AbortSignal.timeout(2000) });
+			if (res.ok) {
+				const data = await res.json();
+				if (data.signed_url) {
+					signed_url = data.signed_url;
+					break;
+				}
+			}
+		} catch {
+			// try next
+		}
+	}
+
+	// Direct ElevenLabs API fallback if bridge or backend is unreachable
+	if (!signed_url) {
+		try {
+			const directRes = await fetch(
+				'https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=agent_8901m4gnv2a6f7xb5n0sbgbznz9f',
+				{
+					headers: {
+						'xi-api-key': 'sk_d9191a981f7ddca619f2dd4b1787e0cf6fd2e65a3c485e8a'
+					},
+					signal: AbortSignal.timeout(5000)
+				}
+			);
+			if (directRes.ok) {
+				const d = await directRes.json();
+				signed_url = d.signed_url;
+			}
+		} catch (err) {
+			console.error('Direct ElevenLabs signed url fallback failed:', err);
+		}
+	}
+
 	if (!signed_url) {
 		throw new Error('Could not obtain ElevenLabs signed URL');
 	}
