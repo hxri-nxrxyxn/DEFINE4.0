@@ -1,0 +1,6 @@
+name,phone,language,city,segment,invoice_no,amount_due,due_date,service_name
+Nitin Shah,+919820998811,Hindi,Mumbai,Enterprise,INV-90218,INR 14500,2026-10-25,Fiber Broadband Subscription
+Vasanth Kumar,+919840112233,Tamil,Chennai,Retail,INV-90219,INR 3200,2026-10-26,Solar Utility Grid Services
+Abdul Rasheed,+919447223344,Malayalam,Kochi,Commercial,INV-90220,INR 8900,2026-10-27,Cloud Hosted VoIP Trunk
+Ganesh Jadhav,+919890334455,Marathi,Nashik,Retail,INV-90221,INR 2150,2026-10-28,Water Purification AMC
+Chandra Sekhar,+919849445566,Telugu,Guntur,Enterprise,INV-90222,INR 27400,2026-10-29,Logistics Fleet FleetTrack
