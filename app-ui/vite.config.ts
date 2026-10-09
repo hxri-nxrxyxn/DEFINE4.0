@@ -21,8 +21,16 @@ export default defineConfig({
 		})
 	],
 	optimizeDeps: {
-		include: ['bits-ui', 'svelte-sonner', 'mode-watcher', 'tailwind-variants', 'cn'],
-		exclude: ['layerchart']
+		include: [
+			'bits-ui',
+			'svelte-sonner',
+			'mode-watcher',
+			'tailwind-variants',
+			'cn',
+			'layerchart',
+			'd3-scale',
+			'd3-shape'
+		]
 	},
 	server: {
 		warmup: {

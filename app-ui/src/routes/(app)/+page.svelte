@@ -14,13 +14,20 @@
 
 	const LANGUAGES = ['Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Marathi', 'Kannada', 'Bengali'] as const;
 
+	type ContactRow = { id: string; name: string; phone: string; language: string };
+
 	let fileInput: HTMLInputElement;
 	let showModal = $state(false);
 	let isEditingRoster = $state(false);
 
-	let contactRows = $state<Array<{ name: string; phone: string; language: string }>>([
-		{ name: 'Daison', phone: '9995283835', language: 'Hindi' },
-		{ name: 'Rahul', phone: '9876543210', language: 'Tamil' }
+	let rowSeq = 0;
+	function makeRow(name = '', phone = '', language = 'Hindi'): ContactRow {
+		return { id: `row-${rowSeq++}`, name, phone, language };
+	}
+
+	let contactRows = $state<ContactRow[]>([
+		makeRow('Daison', '9995283835', 'Hindi'),
+		makeRow('Rahul', '9876543210', 'Tamil')
 	]);
 
 	function openModal() {
@@ -30,7 +37,7 @@
 	}
 
 	function addRow() {
-		contactRows.push({ name: '', phone: '', language: 'Hindi' });
+		contactRows.push(makeRow());
 	}
 
 	function removeRow(index: number) {
@@ -41,28 +48,23 @@
 
 	function editManualRoster() {
 		if (campaign.recipients.length > 0) {
-			contactRows = campaign.recipients.map((r) => ({
-				name: r.name,
-				phone: r.phone.replace(/^\+91\s*/, ''),
-				language: r.language || 'Hindi'
-			}));
+			contactRows = campaign.recipients.map((r) =>
+				makeRow(r.name, r.phone.replace(/^\+91\s*/, ''), r.language || 'Hindi')
+			);
 		}
 		isEditingRoster = true;
 	}
 
 	function deleteRoster() {
 		campaign.clearRecipients();
-		contactRows = [
-			{ name: 'Daison', phone: '9995283835', language: 'Hindi' },
-			{ name: 'Rahul', phone: '9876543210', language: 'Tamil' }
-		];
+		contactRows = [makeRow('Daison', '9995283835', 'Hindi'), makeRow('Rahul', '9876543210', 'Tamil')];
 		isEditingRoster = false;
 		showModal = false;
 		toast.success('Roster deleted');
 	}
 
 	function clearAllRows() {
-		contactRows = [{ name: '', phone: '', language: 'Hindi' }];
+		contactRows = [makeRow()];
 		toast.info('All rows cleared');
 	}
 
@@ -98,11 +100,9 @@
 		}
 
 		campaign.setRecipients(file.name, recipients);
-		contactRows = recipients.map((r) => ({
-			name: r.name,
-			phone: r.phone.replace(/^\+91\s*/, ''),
-			language: r.language || 'Hindi'
-		}));
+		contactRows = recipients.map((r) =>
+			makeRow(r.name, r.phone.replace(/^\+91\s*/, ''), r.language || 'Hindi')
+		);
 		toast.success(`${recipients.length} recipients loaded from ${file.name}`);
 		input.value = '';
 		isEditingRoster = false;
@@ -254,7 +254,7 @@
 
 				<Card.Content class="pt-1 px-4 pb-3 space-y-3">
 					<div class="max-h-72 space-y-2.5 overflow-y-auto overflow-x-hidden pr-0.5">
-						{#each contactRows as row, idx (idx)}
+						{#each contactRows as row, idx (row.id)}
 							<div class="rounded-xl border border-border bg-muted/20 p-2.5 space-y-2">
 								<div class="flex items-center gap-2">
 									<input

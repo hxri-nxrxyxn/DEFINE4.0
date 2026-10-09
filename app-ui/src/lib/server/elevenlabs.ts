@@ -1,0 +1,3 @@
+import { ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID } from '$app/env/private';
+
+export { ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID };

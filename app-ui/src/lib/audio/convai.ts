@@ -28,7 +28,18 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 	let audioQueue: Uint8Array[] = [];
 	let isPlaying = false;
 
-	const audioPlayerCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+	const AudioContextCtor: typeof AudioContext =
+		window.AudioContext || (window as any).webkitAudioContext;
+
+	// Created lazily and resumed explicitly: browsers block eager AudioContext
+	// construction outside a user gesture, which would silence playback.
+	let audioPlayerCtx: AudioContext | null = null;
+	const getPlayerCtx = () => {
+		if (!audioPlayerCtx || audioPlayerCtx.state === 'closed') {
+			audioPlayerCtx = new AudioContextCtor({ sampleRate: 16000 });
+		}
+		return audioPlayerCtx;
+	};
 
 	const playNextChunk = async () => {
 		if (audioQueue.length === 0) {
@@ -38,10 +49,12 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 		isPlaying = true;
 		const chunk = audioQueue.shift()!;
 		try {
-			const decoded = await audioPlayerCtx.decodeAudioData(chunk.buffer.slice(0));
-			const source = audioPlayerCtx.createBufferSource();
+			const ctx = getPlayerCtx();
+			if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+			const decoded = await ctx.decodeAudioData(chunk.buffer.slice(0) as ArrayBuffer);
+			const source = ctx.createBufferSource();
 			source.buffer = decoded;
-			source.connect(audioPlayerCtx.destination);
+			source.connect(ctx.destination);
 			source.onended = () => playNextChunk();
 			source.start();
 			callbacks.onAudioPlay?.();
@@ -55,7 +68,8 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 			micStream = await navigator.mediaDevices.getUserMedia({
 				audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
 			});
-			audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+			audioCtx = new AudioContextCtor({ sampleRate: 16000 });
+			if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
 			const micSource = audioCtx.createMediaStreamSource(micStream);
 			processor = audioCtx.createScriptProcessor(2048, 1, 1);
 

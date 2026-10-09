@@ -19,9 +19,10 @@
 	let view = $state<'menu' | 'settings'>('menu');
 
 	// Always start on the menu when the drawer is opened.
-	$effect(() => {
-		if (settingsOpen) view = 'menu';
-	});
+	function openSettings() {
+		view = 'menu';
+		settingsOpen = true;
+	}
 
 	// Deterministic back targets, so back never bounces between screens.
 	const backTargets: Record<string, string> = {
@@ -55,7 +56,7 @@
 					size="icon-lg"
 					class="size-11"
 					aria-label="Open settings"
-					onclick={() => (settingsOpen = true)}
+					onclick={openSettings}
 				>
 					<Menu />
 				</Button>

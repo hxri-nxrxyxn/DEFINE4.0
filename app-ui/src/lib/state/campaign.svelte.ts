@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import type { Recipient } from '#lib/csv.js';
 
 const STORAGE_KEY = 'campaign-draft';
@@ -34,11 +34,13 @@ class CampaignStore {
 	templateText = $state(DEFAULTS.templateText);
 	tested = $state(DEFAULTS.tested);
 	csvName = $state(DEFAULTS.csvName);
-	recipients = $state<Recipient[]>([]);
-	/** True while the mock server is processing audio/text. */
-	processing = $state(false);
+	// The roster is only ever replaced wholesale, so `$state.raw` avoids the
+	// cost of deeply proxying large CSV imports.
+	recipients = $state.raw<Recipient[]>([]);
 
 	csvUploaded = $derived(this.recipients.length > 0);
+
+	#saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor() {
 		if (!browser) return;
@@ -52,20 +54,34 @@ class CampaignStore {
 
 		$effect.root(() => {
 			$effect(() => {
-				const payload: PersistedState = {
-					userName: this.userName,
-					templateText: this.templateText,
-					tested: this.tested,
-					csvName: this.csvName,
-					recipients: this.recipients
-				};
-				try {
-					sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-				} catch {
-					// storage unavailable (private mode) - ignore
-				}
+				// Track the fields we persist (cheap reference reads only — the
+				// expensive serialization happens later, outside the effect).
+				void this.userName;
+				void this.templateText;
+				void this.tested;
+				void this.csvName;
+				void this.recipients;
+				this.#scheduleSave();
 			});
 		});
+	}
+
+	#scheduleSave() {
+		clearTimeout(this.#saveTimer);
+		this.#saveTimer = setTimeout(() => {
+			const payload: PersistedState = {
+				userName: this.userName,
+				templateText: this.templateText,
+				tested: this.tested,
+				csvName: this.csvName,
+				recipients: $state.snapshot(this.recipients)
+			};
+			try {
+				sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+			} catch {
+				// storage unavailable (private mode) - ignore
+			}
+		}, 250);
 	}
 
 	setRecipients(name: string, recipients: Recipient[]) {
