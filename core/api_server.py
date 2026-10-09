@@ -359,18 +359,34 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             else:
                 self.send_error(404, "Audio file not found")
 
-        elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
-            # Check for call_id in query params
+        elif path == "/api/convai/signed_url":
+            try:
+                headers = {"xi-api-key": "sk_d9191a981f7ddca619f2dd4b1787e0cf6fd2e65a3c485e8a"}
+                url = "https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id=agent_8901m4gnv2a6f7xb5n0sbgbznz9f"
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode())
+                    self._send_json(data)
+            except Exception as e:
+                self._send_json({"error": str(e), "fallback_agent_id": "agent_8901m4gnv2a6f7xb5n0sbgbznz9f"}, 500)
+
+        elif path in ["/api/exoml/start", "/api/calls/webhook/status", "/api/calls/webhook/passthru"]:
             query = self.path.split("?")[1] if "?" in self.path else ""
             call_id = ""
             for q in query.split("&"):
                 if q.startswith("call_id="):
                     call_id = q.split("=")[1]
             
-            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt")
+            cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "audio_cache")
+            if not call_id and os.path.exists(cache_dir):
+                files = sorted([f for f in os.listdir(cache_dir) if f.endswith(".mp3")], key=lambda f: os.path.getmtime(os.path.join(cache_dir, f)), reverse=True)
+                if files:
+                    call_id = files[0].replace(".mp3", "")
+
+            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
             audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
             
-            xml_content = get_exoml_response(audio_url, "Hello! This is an outbound campaign call from DEFINE Voice AI.")
+            xml_content = get_exoml_response(audio_url, "Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs.")
             data = xml_content.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/xml; charset=utf-8")
