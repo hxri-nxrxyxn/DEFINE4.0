@@ -53,7 +53,6 @@ def extract_latest_call_info(dump):
     """
     Returns (call_id_int, call_chunk_str, has_active_call_in_manager)
     """
-    # Check if CallsManager has active calls
     has_active = False
     idx_calls = dump.find("mCalls:")
     idx_audio = dump.find("mCallAudioManager:")
@@ -67,10 +66,18 @@ def extract_latest_call_info(dump):
         return None, "", has_active
     last = matches[-1]
     call_num = int(last.group(1))
-    chunk = dump[last.start():]
+    
+    # Isolate chunk specifically for this call id (from CallTC@X up to next CallTC@ or end)
+    start = last.start()
+    chunk = dump[start:]
     return call_num, chunk, has_active
 
-def monitor_call_cycle(phone, name, duration_sec):
+def get_call_chunk_by_id(call_id, dump):
+    pattern = rf"(CallTC@{call_id}\b.*?)(?=\n\s*CallTC@|\Z)"
+    match = re.search(pattern, dump, re.DOTALL)
+    return match.group(1) if match else ""
+
+def monitor_call_cycle(phone, name, duration_sec, native_dialed=False):
     global current_call_status
     current_call_status["active"] = True
     current_call_status["current_phone"] = phone
@@ -86,8 +93,11 @@ def monitor_call_cycle(phone, name, duration_sec):
     initial_dump = get_telecom_dump()
     initial_call_num, _, _ = extract_latest_call_info(initial_dump)
 
-    print(f"[*] Placing call to {name} ({phone}) (previous call_id: {initial_call_num})", flush=True)
-    place_call(phone)
+    if not native_dialed:
+        print(f"[*] Placing call via ADB to {name} ({phone}) (previous call_id: {initial_call_num})", flush=True)
+        place_call(phone)
+    else:
+        print(f"[*] App placed call directly to {name} ({phone}) (previous call_id: {initial_call_num})", flush=True)
 
     dial_start = time.time()
     call_num = None
@@ -98,34 +108,28 @@ def monitor_call_cycle(phone, name, duration_sec):
     while time.time() - dial_start < max_wait_to_register:
         time.sleep(0.4)
         dump = get_telecom_dump()
-        c_num, chunk, _ = extract_latest_call_info(dump)
+        c_num, _, _ = extract_latest_call_info(dump)
         if c_num is not None and (initial_call_num is None or c_num > initial_call_num):
             call_num = c_num
-            target_chunk = chunk
+            target_chunk = get_call_chunk_by_id(call_num, dump)
             print(f"[+] New call identified: CallTC@{call_num}", flush=True)
             break
 
     # If call didn't register a new number, fall back to latest known
     if call_num is None:
-        c_num, chunk, _ = extract_latest_call_info(get_telecom_dump())
+        c_num, _, _ = extract_latest_call_info(get_telecom_dump())
         call_num = c_num
-        target_chunk = chunk
+        target_chunk = get_call_chunk_by_id(call_num, get_telecom_dump())
 
     # Phase 2: Wait for call to either be answered (SET_ACTIVE) or ended (declined/unanswered)
     call_connected = False
     max_ring_time = 45.0 # seconds
 
     while time.time() - dial_start < max_ring_time:
-        time.sleep(0.5)
+        time.sleep(0.4)
         dump = get_telecom_dump()
-        c_num, chunk, has_active = extract_latest_call_info(dump)
-
-        # Match chunk corresponding to our call
-        if c_num == call_num:
-            target_chunk = chunk
-        elif c_num and call_num and c_num > call_num:
-            # Another call occurred
-            target_chunk = chunk
+        _, _, has_active = extract_latest_call_info(dump)
+        target_chunk = get_call_chunk_by_id(call_num, dump)
 
         # Check if call answered
         if "SET_ACTIVE" in target_chunk:
@@ -136,17 +140,16 @@ def monitor_call_cycle(phone, name, duration_sec):
             break
 
         # Check if call was disconnected or declined before answer
-        if "SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk:
-            # Check elapsed dial time to avoid initial false-positive
-            if time.time() - dial_start > 2.0:
-                print(f"[-] Call to {phone} was declined / ended before pickup.", flush=True)
-                current_call_status["call_state"] = "COMPLETED"
-                current_call_status["outcome"] = "declined"
-                current_call_status["active"] = False
-                return
+        # Must only check the chunk belonging to call_num!
+        if ("SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk) and time.time() - dial_start > 3.0:
+            print(f"[-] Call to {phone} was declined / ended before pickup.", flush=True)
+            current_call_status["call_state"] = "COMPLETED"
+            current_call_status["outcome"] = "declined"
+            current_call_status["active"] = False
+            return
 
         # Fallback check if manager has no active call after dialing started
-        if not has_active and time.time() - dial_start > 4.0:
+        if not has_active and time.time() - dial_start > 5.0:
             print(f"[-] No active call in Telecom Manager. Call declined/ended.", flush=True)
             current_call_status["call_state"] = "COMPLETED"
             current_call_status["outcome"] = "declined"
@@ -170,9 +173,8 @@ def monitor_call_cycle(phone, name, duration_sec):
 
         # Check if recipient hung up early
         dump = get_telecom_dump()
-        c_num, chunk, has_active = extract_latest_call_info(dump)
-        if c_num == call_num:
-            target_chunk = chunk
+        _, _, has_active = extract_latest_call_info(dump)
+        target_chunk = get_call_chunk_by_id(call_num, dump)
 
         if "SET_DISCONNECTED" in target_chunk or "DESTROYED" in target_chunk or not has_active:
             print(f"[+] Call ended early by recipient after {elapsed}s active duration.", flush=True)
@@ -238,6 +240,7 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             phone = data.get("phone", "")
             name = data.get("name", "Recipient")
             duration = int(data.get("duration", 10))
+            native_dialed = bool(data.get("native_dialed", False))
 
             if not phone:
                 self._send_json({"error": "phone required"}, 400)
@@ -247,7 +250,7 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "call already in progress", "status": current_call_status}, 409)
                 return
 
-            t = threading.Thread(target=monitor_call_cycle, args=(phone, name, duration), daemon=True)
+            t = threading.Thread(target=monitor_call_cycle, args=(phone, name, duration, native_dialed), daemon=True)
             t.start()
             self._send_json({"status": "started", "phone": phone, "name": name, "target_duration": duration})
 

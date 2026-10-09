@@ -36,13 +36,14 @@ let activeBridgeUrl = isNative ? 'http://localhost:8765' : '';
  */
 export async function triggerCall(phone: string, name = 'Recipient', duration = 10): Promise<boolean> {
 	// First inform the bridge daemon (both localhost and LAN endpoints)
+	// We pass native_dialed=true when on native so the bridge doesn't trigger a duplicate ACTION_CALL
 	for (const base of (isNative ? BRIDGE_ENDPOINTS : [''])) {
 		try {
 			const endpoint = base ? `${base}/call` : apiUrl('/api/calls/bridge');
 			const res = await fetch(endpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ phone, name, duration }),
+				body: JSON.stringify({ phone, name, duration, native_dialed: isNative }),
 				signal: AbortSignal.timeout(2000)
 			});
 			if (res.ok) {
@@ -54,7 +55,7 @@ export async function triggerCall(phone: string, name = 'Recipient', duration = 
 		}
 	}
 
-	// In native Capacitor environment, also trigger the native ACTION_CALL intent with duration
+	// In native Capacitor environment, trigger the native ACTION_CALL intent
 	if (isNative) {
 		try {
 			await AutoDialer.makeCall({ phone, duration });

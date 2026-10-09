@@ -210,14 +210,21 @@
 				return;
 			}
 
-			// If call is dialing, allow at least 3 seconds before concluding it ended or was declined
-			if (campaign.currentCallStatus === 'dialing' && timeSinceDial < 3.0) {
+			// If call is dialing, allow at least 3.5 seconds for TelecomManager to register and connect
+			if (campaign.currentCallStatus === 'dialing' && timeSinceDial < 3.5) {
 				return;
 			}
 
-			// Call has concluded (either answered + 10s passed, hung up, or declined during ringing)
-			// Note: we're past the 'idle' early-return above, so the call is in progress here.
-			if (status.call_state === 'COMPLETED' || !status.active) {
+			// Call has concluded:
+			// Condition A: status.call_state is explicitly 'COMPLETED' (reported by bridge)
+			// Condition B: call was registered active and has now ended (!status.active)
+			// Condition C: call was dialing and has ended after waiting at least 6 seconds without answering
+			const isConcluded =
+				status.call_state === 'COMPLETED' ||
+				(callRegisteredActive && !status.active && status.call_state !== 'CONNECTED') ||
+				(campaign.currentCallStatus === 'dialing' && !status.active && timeSinceDial > 6.0);
+
+			if (isConcluded && campaign.currentCallStatus !== 'idle') {
 				isExecutingStep = true;
 				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
@@ -246,8 +253,8 @@
 				campaign.currentCallStatus = 'idle';
 				callRegisteredActive = false;
 
-				// Give a 1.5 second breathing room between consecutive calls
-				await new Promise((resolve) => setTimeout(resolve, 1500));
+				// Give 2.5 seconds breathing room between consecutive calls
+				await new Promise((resolve) => setTimeout(resolve, 2500));
 				isExecutingStep = false;
 			}
 		} catch (e) {
