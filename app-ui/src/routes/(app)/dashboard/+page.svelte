@@ -121,7 +121,7 @@
 
 <div class="space-y-6 py-2">
 	<div class="space-y-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Dashboard</h1>
 		<p class="text-sm text-muted-foreground">Outcomes by campaign, language, and segment.</p>
 	</div>
 

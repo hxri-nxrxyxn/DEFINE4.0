@@ -5,9 +5,7 @@
 	import { campaign } from '#lib/state/campaign.svelte.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
-	import Check from '@lucide/svelte/icons/check';
 	import Upload from '@lucide/svelte/icons/upload';
-	import Users from '@lucide/svelte/icons/users';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import X from '@lucide/svelte/icons/x';
@@ -34,7 +32,7 @@
 	function saveRoster() {
 		const valid = contactRows.filter((r) => r.name.trim() || r.phone.trim());
 		if (valid.length === 0) {
-			toast.error('Please add at least one recipient name or phone number');
+			toast.error('Please enter at least one contact name or phone number');
 			return;
 		}
 
@@ -45,8 +43,8 @@
 			segment: r.segment || 'General'
 		}));
 
-		campaign.setRecipients('Test Recipient Roster', recipients);
-		toast.success(`${recipients.length} recipients loaded & saved`);
+		campaign.setRecipients('Contact Roster', recipients);
+		toast.success(`${recipients.length} recipients saved`);
 		showModal = false;
 	}
 
@@ -57,7 +55,7 @@
 
 		const recipients = parseRecipients(await file.text());
 		if (recipients.length === 0) {
-			toast.error('No recipients found in that CSV');
+			toast.error('No recipients found in that CSV file');
 			return;
 		}
 
@@ -70,46 +68,12 @@
 
 <section class="flex min-h-[62vh] flex-col justify-center gap-6 py-6">
 	<div class="space-y-3 text-center">
-		<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-			<Users class="size-3.5" />
-			<span>Multilingual Voice AI Campaign</span>
-		</div>
-		<h1 class="text-3xl font-semibold tracking-tight text-balance">
+		<h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight text-balance leading-tight">
 			Hi {campaign.userName}, what should we publish today?
 		</h1>
-		<p class="text-sm text-muted-foreground">
-			{#if campaign.csvUploaded}
-				Ready · <span class="font-medium text-foreground">{campaign.csvName}</span> · {campaign.recipients.length} recipients
-			{:else}
-				Add or upload recipient contacts to start your campaign.
-			{/if}
+		<p class="text-base text-muted-foreground max-w-sm mx-auto">
+			Upload recipients or set up your voice campaign script.
 		</p>
-	</div>
-
-	<!-- Recipient Summary Badge Card -->
-	<div class="mx-auto w-full max-w-sm">
-		<button
-			type="button"
-			onclick={() => (showModal = true)}
-			class="w-full p-4 rounded-xl border border-border bg-card hover:bg-accent/50 transition-all text-left space-y-2 shadow-xs"
-		>
-			<div class="flex items-center justify-between">
-				<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Recipients Roster</span>
-				{#if campaign.csvUploaded}
-					<span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-						<Check class="size-3.5" /> Ready
-					</span>
-				{:else}
-					<span class="text-xs font-medium text-primary underline">Tap to add</span>
-				{/if}
-			</div>
-			<div class="flex items-center justify-between">
-				<p class="text-base font-semibold">
-					{campaign.csvUploaded ? `${campaign.recipients.length} Recipients Loaded` : 'No Contacts Selected'}
-				</p>
-				<span class="text-xs text-muted-foreground">Edit &rarr;</span>
-			</div>
-		</button>
 	</div>
 </section>
 
@@ -121,8 +85,8 @@
 		<Card.Root class="w-full max-w-md shadow-lg border-border">
 			<Card.Header class="flex flex-row items-center justify-between pb-3">
 				<div>
-					<Card.Title class="text-base font-semibold">Recipients Contact Roster</Card.Title>
-					<Card.Description class="text-xs">Add test contact names and phone numbers.</Card.Description>
+					<Card.Title class="text-base font-semibold">Contact Recipients</Card.Title>
+					<Card.Description class="text-xs">Add target names and phone numbers.</Card.Description>
 				</div>
 				<Button variant="ghost" size="icon-sm" onclick={() => (showModal = false)}>
 					<X class="size-4" />
@@ -132,15 +96,15 @@
 			<Card.Content class="space-y-3 pt-2">
 				{#each contactRows as row, idx}
 					<div class="flex items-center gap-2 p-2.5 rounded-xl border border-border bg-muted/30">
-						<div class="flex-1 space-y-1.5">
+						<div class="flex-1">
 							<input
 								type="text"
 								bind:value={row.name}
-								placeholder="Recipient Name"
+								placeholder="Name"
 								class="w-full px-2.5 py-1.5 text-xs rounded-lg border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
 							/>
 						</div>
-						<div class="flex-1 space-y-1.5">
+						<div class="flex-1">
 							<input
 								type="text"
 								bind:value={row.phone}
@@ -163,10 +127,10 @@
 
 				<div class="flex items-center justify-between pt-2">
 					<Button variant="outline" size="sm" class="rounded-xl text-xs gap-1" onclick={addRow}>
-						<Plus class="size-3.5" /> Add Contact
+						<Plus class="size-3.5" /> Add Row
 					</Button>
 					<Button variant="ghost" size="sm" class="rounded-xl text-xs gap-1" onclick={() => fileInput.click()}>
-						<Upload class="size-3.5" /> Upload CSV File
+						<Upload class="size-3.5" /> Upload File
 					</Button>
 				</div>
 			</Card.Content>
@@ -187,13 +151,6 @@
 	primaryLabel="New campaign"
 	onPrimaryAction={() => goto('/template')}
 	actions={[
-		campaign.csvUploaded
-			? {
-					icon: Check,
-					label: 'Recipients uploaded',
-					variant: 'secondary',
-					onclick: () => (showModal = true)
-				}
-			: { icon: Upload, label: 'Upload CSV', onclick: () => (showModal = true) }
+		{ icon: Upload, label: 'Upload CSV', onclick: () => (showModal = true) }
 	]}
 />
