@@ -421,8 +421,8 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             name = payload.get("name", "Daison")
             template = payload.get("template", "Sample Campaign Script")
             
-            # Resolve callback URL (ngrok / localtunnel / public domain)
-            public_cb = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt/api/exoml/start")
+            # Resolve callback URL (ngrok / localtunnel / Exotel Applet URL)
+            public_cb = os.environ.get("EXOTEL_CALLBACK_URL", "")
             
             call_res = platform.telephony.trigger_single_call(
                 recipient_phone=phone,

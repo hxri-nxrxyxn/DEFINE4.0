@@ -133,11 +133,21 @@ class ExotelClient:
         call_sid = f"call_{uuid.uuid4().hex[:16]}"
         if self.mode == "LIVE" and "mock" not in self.account_sid:
             url = f"{self.base_url}/v1/Accounts/{self.account_sid}/Calls/connect.json"
+            
+            # Format phone number for Exotel India (10-digit -> 09995283835)
+            formatted_phone = recipient_phone.strip().replace(" ", "").replace("-", "")
+            if len(formatted_phone) == 10 and not formatted_phone.startswith("0"):
+                formatted_phone = "0" + formatted_phone
+            elif formatted_phone.startswith("+91"):
+                formatted_phone = "0" + formatted_phone[3:]
+
+            exoml_url = callback_url if (callback_url and ("my.exotel.com" in callback_url or callback_url.startswith("https://"))) else f"http://my.exotel.com/{self.account_sid}/exoml/start_voice/41956"
+
             data = {
-                "From": recipient_phone,
+                "From": formatted_phone,
                 "CallerId": self.caller_id,
-                "Url": callback_url,
-                "StatusCallback": callback_url,
+                "Url": exoml_url,
+                "StatusCallback": exoml_url,
                 "CustomField": custom_field
             }
             try:
