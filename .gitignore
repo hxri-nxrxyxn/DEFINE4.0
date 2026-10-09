@@ -16,3 +16,12 @@
 
 # Malayalam Tools (tracked separately in its own repository with large model binaries)
 malayalam-stuff/
+
+# Archive files
+*.zip
+**/*.zip
+
+# OS and Editor
+.DS_Store
+Thumbs.db
+.vscode/
