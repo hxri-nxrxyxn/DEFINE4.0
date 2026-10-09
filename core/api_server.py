@@ -404,7 +404,7 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             if files:
                 call_id = files[0].replace(".mp3", "")
 
-        public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
+        public_base = platform.telephony.callback_url or os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
         audio_url = f"{public_base}/audio/{call_id}.mp3" if call_id else ""
 
         print(f"[Exotel Webhook] Path: {self.path} | call_id: {call_id} | audio_url: {audio_url}")
@@ -483,7 +483,7 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
             audio_path = synthesize_prompt_audio(template, call_id=call_id)
 
             # 3. Construct public Cloudflare Tunnel ExoML endpoint URL for Exotel
-            public_base = os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
+            public_base = platform.telephony.callback_url or os.environ.get("EXOTEL_CALLBACK_URL", "https://designed-collect-orleans-lawsuit.trycloudflare.com")
             exoml_url = f"{public_base}/api/exoml/start?call_id={call_id}"
 
             # 4. Trigger live Exotel call with ExoML URL and pass call_id as custom_field

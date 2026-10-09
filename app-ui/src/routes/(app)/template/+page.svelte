@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onDestroy } from 'svelte';
 	import { ActionBar } from '#lib/components/action-bar/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
@@ -11,6 +12,10 @@
 	import { toast } from 'svelte-sonner';
 
 	let playing = $state(false);
+	let recording = $state(false);
+	let transcribing = $state(false);
+	let mediaRecorder: MediaRecorder | undefined;
+	let chunks: BlobPart[] = [];
 
 	const templateTips = [
 		{
@@ -70,13 +75,71 @@
 			toast.error('Error generating audio preview');
 		}
 	}
+
+	async function toggleMic() {
+		if (recording) {
+			mediaRecorder?.stop();
+			return;
+		}
+
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			const mime = MediaRecorder.isTypeSupported('audio/webm')
+				? 'audio/webm'
+				: MediaRecorder.isTypeSupported('audio/mp4')
+					? 'audio/mp4'
+					: '';
+
+			mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+			chunks = [];
+			mediaRecorder.ondataavailable = (e) => {
+				if (e.data.size > 0) chunks.push(e.data);
+			};
+			mediaRecorder.onstop = async () => {
+				stream.getTracks().forEach((t) => t.stop());
+				recording = false;
+				transcribing = true;
+				try {
+					const form = new FormData();
+					form.append('audio', new Blob(chunks, { type: mime || 'audio/webm' }), 'speech.webm');
+					const res = await fetch(apiUrl('/api/compose'), { method: 'POST', body: form });
+					const data = await res.json();
+					if (data.script) {
+						campaign.templateText = data.script;
+						toast.success('Script ready', {
+							description: data.transcript ? `Heard: "${data.transcript}"` : undefined
+						});
+					} else {
+						toast.error(data.error || 'Could not understand that');
+					}
+				} catch {
+					toast.error('Transcription failed');
+				} finally {
+					transcribing = false;
+				}
+			};
+			mediaRecorder.start();
+			recording = true;
+			toast.info('Listening… tap again to stop');
+		} catch {
+			toast.error('Microphone unavailable', {
+				description: 'Allow mic access (needs HTTPS or localhost).'
+			});
+		}
+	}
+
+	onDestroy(() => {
+		try {
+			mediaRecorder?.stop();
+		} catch {}
+	});
 </script>
 
 <section class="space-y-4 py-2">
 	<div class="space-y-1">
 		<h1 class="scroll-m-20 text-3xl font-extrabold tracking-tight">Template</h1>
 		<p class="text-sm text-muted-foreground">
-			Tap record to speak, type your script below, or select a template text.
+			Tell it what to do — e.g. "remind Class 8 parents about tomorrow's meeting" — by speaking, typing, or picking a template.
 		</p>
 	</div>
 
@@ -116,6 +179,11 @@
 	actions={[
 		{ icon: Trash2, label: 'Reset', onclick: reset },
 		{ icon: Volume2, label: playing ? 'Playing…' : 'Listen Voice', onclick: playAudio },
-		{ icon: Mic, label: 'Record audio', onclick: () => goto('/record') }
+		{
+			icon: Mic,
+			label: transcribing ? 'Writing…' : recording ? 'Stop' : 'Speak',
+			onclick: toggleMic,
+			disabled: transcribing
+		}
 	]}
 />

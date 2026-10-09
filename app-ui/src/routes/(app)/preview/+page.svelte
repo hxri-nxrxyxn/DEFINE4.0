@@ -3,7 +3,7 @@
 	import { ActionBar } from '#lib/components/action-bar/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { campaign } from '#lib/state/campaign.svelte.js';
-	import { triggerCall } from '#lib/audio/auto-dialer.js';
+	import { apiUrl } from '#lib/config.js';
 	import Phone from '@lucide/svelte/icons/phone';
 	import Users from '@lucide/svelte/icons/users';
 	import Play from '@lucide/svelte/icons/play';
@@ -11,23 +11,58 @@
 
 	let calling = $state(false);
 
+	async function playVoiceLocally(text: string) {
+		try {
+			const res = await fetch(apiUrl('/api/process'), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text })
+			});
+			const data = await res.json();
+			if (data.audio_base_64) {
+				void new Audio(`data:audio/mpeg;base64,${data.audio_base_64}`).play();
+			}
+		} catch {
+			// ignore
+		}
+	}
+
 	async function testCall() {
-		calling = true;
+		const script = campaign.templateText.trim();
 		const targetNumber = campaign.recipients[0]?.phone || '9995283835';
 		const targetName = campaign.recipients[0]?.name || 'Daison';
 
+		if (!script) {
+			toast.error('Add a script first', { description: 'Speak or type what the call should say.' });
+			return;
+		}
+
+		calling = true;
 		try {
-			// Trigger on-device automated call (with 10-sec connected timer)
-			await triggerCall(targetNumber, targetName, 10);
-			campaign.tested = true;
-			toast.success('Test Call Placed', {
-				description: `Automated test call placed to ${targetName} (${targetNumber}).`
+			const res = await fetch(apiUrl('/api/calls/dispatch'), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ phone: targetNumber, name: targetName, template: script })
 			});
-		} catch (e) {
+			const data = await res.json();
 			campaign.tested = true;
-			toast.success('Test Call Triggered', {
-				description: 'Automated dialer triggered.'
-			});
+
+			if (data?.backend === 'offline') {
+				toast.error('Call backend offline', {
+					description: 'Start the core server + tunnel. Playing the voice here instead.'
+				});
+				await playVoiceLocally(script);
+			} else if (data?.status === 'error' || data?.call_details?.status === 'error') {
+				toast.error('Call failed', {
+					description: data?.call_details?.message || data?.message || 'The telephony gateway rejected the call.'
+				});
+			} else {
+				toast.success('Demo call placed', {
+					description: `Dialing ${targetNumber} with the ElevenLabs voice message.`
+				});
+			}
+		} catch {
+			toast.error('Could not place the call');
 		} finally {
 			calling = false;
 		}

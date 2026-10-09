@@ -22,6 +22,7 @@ def _load_exotel_config():
     caller_id = os.environ.get("EXOTEL_CALLER_ID", "")
     subdomain = os.environ.get("EXOTEL_SUBDOMAIN", "api.in.exotel.com")
     mode = os.environ.get("TELEPHONY_MODE", "")
+    callback_url = os.environ.get("EXOTEL_CALLBACK_URL", "")
 
     # Look for exotel_cred.txt or .env in root
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +38,9 @@ def _load_exotel_config():
                         elif k == "EXOTEL_API_KEY" and not key: key = v
                         elif k == "EXOTEL_API_TOKEN" and not token: token = v
                         elif k == "EXOTEL_CALLER_ID" and not caller_id: caller_id = v
+                        elif k == "EXOTEL_SUBDOMAIN" and not subdomain: subdomain = v
+                        elif k == "TELEPHONY_MODE" and not mode: mode = v
+                        elif k == "EXOTEL_CALLBACK_URL" and not callback_url: callback_url = v
         except Exception:
             pass
 
@@ -52,7 +56,8 @@ def _load_exotel_config():
         "token": token or "mock_exotel_token",
         "caller_id": caller_id,
         "subdomain": subdomain,
-        "mode": mode
+        "mode": mode,
+        "callback_url": callback_url
     }
 
 cfg = _load_exotel_config()
@@ -72,6 +77,7 @@ class ExotelClient:
         self.api_key = cfg["key"]
         self.api_token = cfg["token"]
         self.caller_id = cfg["caller_id"]
+        self.callback_url = cfg.get("callback_url", "")
         self.base_url = f"https://{self.api_key}:{self.api_token}@{cfg['subdomain']}"
 
     def trigger_batch_campaign(
