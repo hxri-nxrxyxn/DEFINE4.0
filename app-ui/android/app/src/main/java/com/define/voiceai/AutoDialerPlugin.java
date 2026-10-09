@@ -6,6 +6,8 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.telecom.TelecomManager;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyCallback;
@@ -24,6 +26,11 @@ public class AutoDialerPlugin extends Plugin {
     private TelephonyManager telephonyManager;
     private TelecomManager telecomManager;
     private int currentCallState = TelephonyManager.CALL_STATE_IDLE;
+    private Handler timerHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoHangupRunnable = null;
+    private long callPickupTimestamp = 0;
+    private int targetDurationSeconds = 10;
+    private boolean isOffhook = false;
 
     @RequiresApi(api = Build.VERSION_CODES.S)
     private static class Api31Callback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
@@ -74,10 +81,21 @@ public class AutoDialerPlugin extends Plugin {
     public void handleCallStateChanged(int state) {
         currentCallState = state;
         String stateStr = "IDLE";
+        
         if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
             stateStr = "OFFHOOK";
+            if (!isOffhook) {
+                isOffhook = true;
+                callPickupTimestamp = System.currentTimeMillis();
+                // Schedule native auto-disconnect
+                scheduleAutoDisconnect(targetDurationSeconds);
+            }
         } else if (state == TelephonyManager.CALL_STATE_RINGING) {
             stateStr = "RINGING";
+        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
+            stateStr = "IDLE";
+            cancelAutoDisconnect();
+            isOffhook = false;
         }
 
         JSObject ret = new JSObject();
@@ -87,15 +105,66 @@ public class AutoDialerPlugin extends Plugin {
         notifyListeners("callStateChange", ret);
     }
 
+    private void scheduleAutoDisconnect(int seconds) {
+        cancelAutoDisconnect();
+        autoHangupRunnable = new Runnable() {
+            @Override
+            public void run() {
+                performHangup();
+            }
+        };
+        timerHandler.postDelayed(autoHangupRunnable, seconds * 1000L);
+    }
+
+    private void cancelAutoDisconnect() {
+        if (autoHangupRunnable != null) {
+            timerHandler.removeCallbacks(autoHangupRunnable);
+            autoHangupRunnable = null;
+        }
+    }
+
+    private boolean performHangup() {
+        boolean ended = false;
+        try {
+            if (telecomManager != null && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    ended = telecomManager.endCall();
+                }
+            }
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+
+        if (!ended) {
+            // Fallback attempt via Runtime keyevent 6
+            try {
+                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "6"});
+                ended = true;
+            } catch (Throwable ignore) {}
+        }
+        return ended;
+    }
+
     @PluginMethod
     public void makeCall(PluginCall call) {
         String phone = call.getString("phone");
+        Integer duration = call.getInt("duration", 10);
+        if (duration != null) {
+            targetDurationSeconds = duration;
+        } else {
+            targetDurationSeconds = 10;
+        }
+
         if (phone == null || phone.trim().isEmpty()) {
             call.reject("Phone number is required");
             return;
         }
 
         String cleanPhone = phone.trim().replaceAll("\\s+", "");
+        isOffhook = false;
+        callPickupTimestamp = 0;
+        cancelAutoDisconnect();
+
         Intent intent;
         if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
             intent = new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + cleanPhone));
@@ -109,6 +178,7 @@ public class AutoDialerPlugin extends Plugin {
             JSObject res = new JSObject();
             res.put("status", "dialing");
             res.put("phone", cleanPhone);
+            res.put("targetDuration", targetDurationSeconds);
             call.resolve(res);
         } catch (Exception e) {
             call.reject("Failed to trigger call: " + e.getMessage(), e);
@@ -117,16 +187,8 @@ public class AutoDialerPlugin extends Plugin {
 
     @PluginMethod
     public void endCall(PluginCall call) {
-        boolean ended = false;
-        try {
-            if (telecomManager != null && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    ended = telecomManager.endCall();
-                }
-            }
-        } catch (Throwable t) {
-            t.printStackTrace();
-        }
+        cancelAutoDisconnect();
+        boolean ended = performHangup();
 
         JSObject res = new JSObject();
         res.put("ended", ended);
@@ -145,6 +207,13 @@ public class AutoDialerPlugin extends Plugin {
         }
         res.put("state", stateStr);
         res.put("stateCode", currentCallState);
+        
+        long elapsed = 0;
+        if (isOffhook && callPickupTimestamp > 0) {
+            elapsed = (System.currentTimeMillis() - callPickupTimestamp) / 1000;
+        }
+        res.put("elapsedSeconds", elapsed);
         call.resolve(res);
     }
 }
+

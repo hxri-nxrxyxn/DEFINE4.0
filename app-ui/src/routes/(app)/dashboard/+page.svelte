@@ -100,6 +100,8 @@
 	// Automated Roster Campaign Execution Loop
 	let loopTimer: any = null;
 	let isExecutingStep = false;
+	let lastDialTimestamp = 0;
+	let callRegisteredActive = false;
 
 	function formatScriptForRecipient(template: string, name: string): string {
 		if (!template) return `Hello ${name}, this is an automated IVR call.`;
@@ -136,6 +138,8 @@
 			isExecutingStep = true;
 			campaign.currentCallStatus = 'dialing';
 			campaign.currentCallDurationSec = 0;
+			lastDialTimestamp = Date.now();
+			callRegisteredActive = false;
 
 			const formattedScript = formatScriptForRecipient(campaign.templateText, current.name);
 
@@ -164,20 +168,34 @@
 			return;
 		}
 
-		// 2. Poll ongoing call status from bridge
+		// 2. Poll ongoing call status from bridge or native plugin
 		try {
 			const status = await pollCallStatus();
-			if (status.call_state === 'CONNECTED') {
+			const now = Date.now();
+			const timeSinceDial = (now - lastDialTimestamp) / 1000;
+
+			// If connected
+			if (status.call_state === 'CONNECTED' || status.active) {
+				callRegisteredActive = true;
 				campaign.currentCallStatus = 'connected';
-				campaign.currentCallDurationSec = status.elapsed_seconds;
+				campaign.currentCallDurationSec = status.elapsed_seconds || 0;
 
 				// Update top log item
 				if (campaign.callLogs[0]) {
 					campaign.callLogs[0].status = 'connected';
-					campaign.callLogs[0].durationSeconds = status.elapsed_seconds;
+					campaign.callLogs[0].durationSeconds = status.elapsed_seconds || 0;
 				}
-			} else if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'idle')) {
-				// Call finished (either 10s elapsed, declined, or hung up)
+				return;
+			}
+
+			// If call is dialing, allow at least 3 seconds before concluding it ended or was declined
+			if (campaign.currentCallStatus === 'dialing' && timeSinceDial < 3.0) {
+				return;
+			}
+
+			// Call has concluded (either answered + 10s passed, hung up, or declined during ringing)
+			if (status.call_state === 'COMPLETED' || (!status.active && campaign.currentCallStatus !== 'idle')) {
+				isExecutingStep = true;
 				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
 
@@ -196,10 +214,18 @@
 					});
 				}
 
-				// Advance to the next contact in the roster
+				// Terminate any trailing call state on device
+				await terminateCall();
+
+				// Advance to next contact
 				campaign.currentCallIndex++;
 				campaign.currentCallDurationSec = 0;
 				campaign.currentCallStatus = 'idle';
+				callRegisteredActive = false;
+
+				// Give a 1.5 second breathing room between consecutive calls
+				await new Promise((resolve) => setTimeout(resolve, 1500));
+				isExecutingStep = false;
 			}
 		} catch (e) {
 			console.error('Status polling error:', e);
