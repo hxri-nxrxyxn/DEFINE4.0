@@ -39,9 +39,9 @@
 					liveTranscript = msg;
 				},
 				onAgentMessage: (msg) => {
-					agentResponseText += msg + ' ';
+					agentResponseText = msg;
 					status = 'speaking';
-					campaign.templateText = agentResponseText.trim();
+					campaign.templateText = msg.trim();
 				},
 				onAudioPlay: () => {
 					status = 'speaking';

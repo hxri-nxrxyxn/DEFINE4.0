@@ -132,13 +132,22 @@ export async function startConvAISession(callbacks: ConvAICallbacks): Promise<Co
 			processor?.disconnect();
 		} catch {}
 		try {
-			audioCtx?.close();
+			if (audioCtx && audioCtx.state !== 'closed') {
+				void audioCtx.close().catch(() => {});
+			}
+		} catch {}
+		try {
+			if (audioPlayerCtx && audioPlayerCtx.state !== 'closed') {
+				void audioPlayerCtx.close().catch(() => {});
+			}
 		} catch {}
 		try {
 			micStream?.getTracks().forEach((t) => t.stop());
 		} catch {}
 		try {
-			socket.close();
+			if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+				socket.close();
+			}
 		} catch {}
 	};
 
