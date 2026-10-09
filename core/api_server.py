@@ -339,6 +339,21 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
                 "erasure_ledger": erasure_audit_ledger[-10:]
             })
 
+        elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
+            xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="woman">Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs. Press 1 to confirm your attendance, press 2 to reschedule, or press 9 to opt out.</Say>
+    <Gather action="/api/calls/webhook/intent" method="POST" numDigits="1" timeout="10">
+    </Gather>
+</Response>"""
+            data = xml_content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+
         else:
             self.send_error(404, "Endpoint not found")
 
@@ -386,14 +401,32 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
                 "manifest": manifest
             })
 
+        elif path in ["/api/exoml/start", "/api/calls/webhook/status"]:
+            xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="woman">Hello! This is a live outbound campaign call from DEFINE Voice AI powered by ElevenLabs. Press 1 to confirm your attendance, press 2 to reschedule, or press 9 to opt out.</Say>
+    <Gather action="/api/calls/webhook/intent" method="POST" numDigits="1" timeout="10">
+    </Gather>
+</Response>"""
+            data = xml_content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+
         elif path == "/api/calls/dispatch":
             phone = payload.get("phone", "+919995283835")
             name = payload.get("name", "Daison")
             template = payload.get("template", "Sample Campaign Script")
             
+            # Resolve callback URL (ngrok / localtunnel / public domain)
+            public_cb = os.environ.get("EXOTEL_CALLBACK_URL", "https://sharp-breads-cover.loca.lt/api/exoml/start")
+            
             call_res = platform.telephony.trigger_single_call(
                 recipient_phone=phone,
-                callback_url="http://localhost:8000/api/calls/webhook/status",
+                callback_url=public_cb,
                 custom_field=template
             )
             self._send_json({
