@@ -32,6 +32,7 @@ import java.net.URL;
 public class AutoDialerPlugin extends Plugin {
 
     private static final String TAG = "AutoDialer";
+    private static final String DEFAULT_BRIDGE_URL = "http://10.80.0.48:8765";
     private TelephonyManager telephonyManager;
     private TelecomManager telecomManager;
     private int currentCallState = TelephonyManager.CALL_STATE_IDLE;
@@ -46,6 +47,7 @@ public class AutoDialerPlugin extends Plugin {
     private Thread hangupThread = null;
     private volatile boolean hangupWatching = false;
     private String hangupUrl = null;
+    private String bridgeUrl = DEFAULT_BRIDGE_URL;
 
     @RequiresApi(api = Build.VERSION_CODES.S)
     private static class Api31Callback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
@@ -102,8 +104,10 @@ public class AutoDialerPlugin extends Plugin {
             if (!isOffhook) {
                 isOffhook = true;
                 callPickupTimestamp = System.currentTimeMillis();
-                // No native auto-disconnect: the call now stays connected until
-                // the recipient hangs up or an external trigger calls endCall().
+                // Self-start the background hangup watcher the moment the call
+                // connects. The WebView's JS timers are frozen while the in-call
+                // UI is foreground, so we cannot rely on JS to start it.
+                startWatcher(bridgeUrl);
             }
         } else if (state == TelephonyManager.CALL_STATE_RINGING) {
             stateStr = "RINGING";
@@ -111,7 +115,12 @@ public class AutoDialerPlugin extends Plugin {
             stateStr = "IDLE";
             cancelAutoDisconnect();
             isOffhook = false;
+            hangupWatching = false;
         }
+
+        // Report the state to the bridge directly from native code (the WebView
+        // may be frozen in the background during the call).
+        postState(stateStr);
 
         JSObject ret = new JSObject();
         ret.put("state", stateStr);
@@ -141,14 +150,26 @@ public class AutoDialerPlugin extends Plugin {
             Log.e(TAG, "telecomManager.endCall threw", t);
         }
 
+        // Legacy fallback: ITelephony.endCall() via reflection. Blocked by the
+        // hidden-API blacklist on most modern builds, but harmless to attempt.
         if (!ended) {
-            // Best-effort fallback (usually not permitted for a normal app).
             try {
-                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "6"});
-            } catch (Throwable ignore) {
-                Log.e(TAG, "keyevent fallback failed", ignore);
+                TelephonyManager tm = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
+                java.lang.reflect.Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
+                getITelephony.setAccessible(true);
+                Object iTelephony = getITelephony.invoke(tm);
+                java.lang.reflect.Method endCall = iTelephony.getClass().getDeclaredMethod("endCall");
+                endCall.setAccessible(true);
+                Object r = endCall.invoke(iTelephony);
+                if (r instanceof Boolean) {
+                    ended = (Boolean) r;
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "ITelephony fallback failed", t);
             }
         }
+
+        postDiag("hangup_result", "ended=" + ended + " perm=" + perm + " state=" + currentCallState);
         Log.i(TAG, "performHangup result ended=" + ended);
 
         // Immediately re-assert screen wakefulness and return focus to MainActivity
@@ -179,6 +200,14 @@ public class AutoDialerPlugin extends Plugin {
             targetDurationSeconds = duration;
         } else {
             targetDurationSeconds = 10;
+        }
+
+        // Remember the bridge URL so the native watcher can self-start when the
+        // call goes OFFHOOK (the WebView is frozen while the in-call UI is up).
+        String bUrl = call.getString("bridgeUrl");
+        if (bUrl != null && !bUrl.trim().isEmpty()) {
+            bridgeUrl = bUrl.trim().replaceAll("/+$", "");
+            hangupUrl = bridgeUrl;
         }
 
         if (phone == null || phone.trim().isEmpty()) {
@@ -229,65 +258,134 @@ public class AutoDialerPlugin extends Plugin {
             call.reject("url is required");
             return;
         }
-        hangupUrl = url.trim().replaceAll("/+$", "");
+        startWatcher(url.trim().replaceAll("/+$", ""));
+        call.resolve();
+    }
+
+    /** Start (idempotently) the background thread that polls the bridge and
+     *  ends the call when the bridge requests it. Safe to call from any thread. */
+    private void startWatcher(final String url) {
+        if (url == null || url.isEmpty()) {
+            return;
+        }
+        hangupUrl = url;
+        if (hangupWatching && hangupThread != null && hangupThread.isAlive()) {
+            return;
+        }
         hangupWatching = true;
-        Log.i(TAG, "startHangupWatcher url=" + hangupUrl);
-        if (hangupThread == null || !hangupThread.isAlive()) {
-            hangupThread = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    int attempts = 0;
-                    boolean loggedError = false;
-                    while (hangupWatching && attempts < 150) {
-                        attempts++;
-                        boolean done = false;
-                        try {
-                            HttpURLConnection conn = (HttpURLConnection) new URL(hangupUrl + "/status").openConnection();
-                            conn.setConnectTimeout(2000);
-                            conn.setReadTimeout(2000);
-                            if (conn.getResponseCode() == 200) {
-                                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-                                StringBuilder sb = new StringBuilder();
-                                String line;
-                                while ((line = reader.readLine()) != null) sb.append(line);
-                                reader.close();
-                                JSONObject o = new JSONObject(sb.toString());
-                                boolean active = o.optBoolean("active", false);
-                                boolean hangup = o.optBoolean("hangup_requested", false);
-                                String state = o.optString("call_state", "");
-                                if (!active && ("COMPLETED".equals(state) || "IDLE".equals(state))) {
-                                    done = true;
-                                } else if (hangup) {
-                                    Log.i(TAG, "watcher: hangup_requested active=" + active + " state=" + state + " -> performHangup");
-                                    timerHandler.post(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            performHangup();
-                                        }
-                                    });
-                                }
-                            }
-                        } catch (Throwable t) {
-                            if (!loggedError) {
-                                loggedError = true;
-                                Log.e(TAG, "hangup watcher poll error", t);
+        Log.i(TAG, "startWatcher url=" + hangupUrl);
+        postDiag("watcher_start", hangupUrl);
+        hangupThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int attempts = 0;
+                boolean loggedError = false;
+                while (hangupWatching && attempts < 300) {
+                    attempts++;
+                    boolean done = false;
+                    try {
+                        HttpURLConnection conn = (HttpURLConnection) new URL(hangupUrl + "/status").openConnection();
+                        conn.setConnectTimeout(2000);
+                        conn.setReadTimeout(2000);
+                        if (conn.getResponseCode() == 200) {
+                            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                            StringBuilder sb = new StringBuilder();
+                            String line;
+                            while ((line = reader.readLine()) != null) sb.append(line);
+                            reader.close();
+                            JSONObject o = new JSONObject(sb.toString());
+                            boolean active = o.optBoolean("active", false);
+                            boolean hangup = o.optBoolean("hangup_requested", false);
+                            String state = o.optString("call_state", "");
+                            if (!active && ("COMPLETED".equals(state) || "IDLE".equals(state))) {
+                                done = true;
+                            } else if (hangup) {
+                                Log.i(TAG, "watcher: hangup_requested active=" + active + " state=" + state + " -> performHangup");
+                                postDiag("hangup_detected", "active=" + active + " state=" + state);
+                                timerHandler.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        performHangup();
+                                    }
+                                });
                             }
                         }
-                        if (done) break;
-                        try {
-                            Thread.sleep(800);
-                        } catch (InterruptedException e) {
-                            break;
+                    } catch (Throwable t) {
+                        if (!loggedError) {
+                            loggedError = true;
+                            Log.e(TAG, "hangup watcher poll error", t);
+                            postDiag("watcher_poll_error", String.valueOf(t.getMessage()));
                         }
                     }
-                    Log.i(TAG, "hangup watcher stopped after " + attempts + " attempts");
-                    hangupWatching = false;
+                    if (done) break;
+                    try {
+                        Thread.sleep(800);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
                 }
-            });
-            hangupThread.setDaemon(true);
-            hangupThread.start();
+                postDiag("watcher_stopped", "attempts=" + attempts);
+                Log.i(TAG, "hangup watcher stopped after " + attempts + " attempts");
+                hangupWatching = false;
+            }
+        });
+        hangupThread.setDaemon(true);
+        hangupThread.start();
+    }
+
+    /** Fire-and-forget diagnostic POST to the bridge (never blocks a caller). */
+    private void postDiag(final String event, final String detail) {
+        final String url = (hangupUrl != null && !hangupUrl.isEmpty()) ? hangupUrl : bridgeUrl;
+        if (url == null || url.isEmpty()) {
+            return;
         }
-        call.resolve();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url + "/diag").openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(2500);
+                    conn.setReadTimeout(2500);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    String safe = detail == null ? "" : detail.replace("\\", "").replace("\"", "'");
+                    String payload = "{\"event\":\"" + event + "\",\"detail\":\"" + safe + "\"}";
+                    conn.getOutputStream().write(payload.getBytes("UTF-8"));
+                    conn.getResponseCode();
+                    conn.disconnect();
+                } catch (Throwable t) {
+                    Log.e(TAG, "diag post failed: " + event, t);
+                }
+            }
+        }).start();
+    }
+
+    /** Fire-and-forget POST of a call-state update to the bridge. */
+    private void postState(final String state) {
+        final String url = (hangupUrl != null && !hangupUrl.isEmpty()) ? hangupUrl : bridgeUrl;
+        if (url == null || url.isEmpty()) {
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url + "/call/state").openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(2500);
+                    conn.setReadTimeout(2500);
+                    conn.setRequestProperty("Content-Type", "application/json");
+                    String payload = "{\"state\":\"" + state + "\"}";
+                    conn.getOutputStream().write(payload.getBytes("UTF-8"));
+                    conn.getResponseCode();
+                    conn.disconnect();
+                } catch (Throwable t) {
+                    Log.e(TAG, "state post failed: " + state, t);
+                }
+            }
+        }).start();
     }
 
     @PluginMethod

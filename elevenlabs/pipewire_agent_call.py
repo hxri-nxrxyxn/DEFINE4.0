@@ -898,8 +898,9 @@ class PermanentCallSession:
             pass
         self._schedule_fallback_end()
 
-    def _schedule_fallback_end(self, delay: float = 6.0) -> None:
-        """Guarantee we disconnect from our side even if the agent never calls end_call."""
+    def _schedule_fallback_end(self, delay: float = 12.0) -> None:
+        """Guarantee we disconnect from our side even if the agent never calls end_call.
+        Kept long enough that the agent can finish its spoken goodbye first."""
         if self._fallback_task and not self._fallback_task.done():
             return
 

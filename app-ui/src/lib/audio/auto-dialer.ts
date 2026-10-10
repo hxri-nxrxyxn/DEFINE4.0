@@ -8,7 +8,7 @@ export interface CallStateEvent {
 }
 
 export interface AutoDialerPlugin {
-	makeCall(options: { phone: string; duration?: number }): Promise<{ status: string; phone: string; targetDuration: number }>;
+	makeCall(options: { phone: string; duration?: number; bridgeUrl?: string }): Promise<{ status: string; phone: string; targetDuration: number }>;
 	endCall(): Promise<{ ended: boolean; stateCode: number }>;
 	getCallState(): Promise<{ state: string; stateCode: number; elapsedSeconds: number }>;
 	startHangupWatcher(options: { url: string }): Promise<void>;
@@ -142,7 +142,7 @@ export async function triggerCall(
 	if (isNative) {
 		await registerCallStateForwarding();
 		try {
-			await AutoDialer.makeCall({ phone });
+			await AutoDialer.makeCall({ phone, bridgeUrl: activeBridgeUrl });
 			await startHangupWatcher();
 			return true;
 		} catch (e) {

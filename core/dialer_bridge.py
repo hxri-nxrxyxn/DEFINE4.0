@@ -662,6 +662,12 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                 "ended": end_now,
             })
 
+        elif self.path == "/diag":
+            # Native app diagnostics (no USB needed): log so the run can be
+            # inspected from this laptop even while the phone is unplugged.
+            print(f"[diag] {data}", flush=True)
+            self._send_json({"ok": True})
+
         elif self.path == "/api/convai/configure":
             mode = (data.get("mode", "") or "").lower()
             script = data.get("script", "") or ""
