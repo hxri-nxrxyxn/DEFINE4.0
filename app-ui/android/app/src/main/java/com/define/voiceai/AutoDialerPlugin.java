@@ -186,7 +186,8 @@ public class AutoDialerPlugin extends Plugin {
 
         postDiag("hangup_result", "ended=" + ended + " accReq=" + accRequested
                 + " accOn=" + EndCallAccessibilityService.isConnected()
-                + " perm=" + perm + " state=" + currentCallState);
+                + " perm=" + perm + " state=" + currentCallState
+                + " probe=" + EndCallAccessibilityService.getLastProbe());
         Log.i(TAG, "performHangup result ended=" + ended + " accReq=" + accRequested);
 
         // Immediately re-assert screen wakefulness and return focus to MainActivity

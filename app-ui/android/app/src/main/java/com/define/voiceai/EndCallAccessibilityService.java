@@ -28,6 +28,7 @@ public class EndCallAccessibilityService extends AccessibilityService {
     private static EndCallAccessibilityService instance;
     private static volatile boolean pendingEnd = false;
     private static volatile long pendingSince = 0L;
+    private static volatile String lastProbe = "";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = new Runnable() {
@@ -49,6 +50,11 @@ public class EndCallAccessibilityService extends AccessibilityService {
     /** True when the user has enabled the "Define Voice AI" accessibility service. */
     public static boolean isConnected() {
         return instance != null;
+    }
+
+    /** Last sampled description of the in-call UI (for debugging). */
+    public static String getLastProbe() {
+        return lastProbe;
     }
 
     /** Ask the service to tap the in-call End button. Returns true if connected. */
@@ -129,8 +135,32 @@ public class EndCallAccessibilityService extends AccessibilityService {
                     }
                 }
             }
+            // Nothing matched yet — capture what the in-call UI looks like.
+            if (root != null) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("pkg=").append(root.getPackageName()).append(" ");
+                collectProbe(root, sb, new int[]{0});
+                lastProbe = sb.toString();
+            }
         } catch (Throwable t) {
             Log.e(TAG, "accessibility attemptClick failed", t);
+        }
+    }
+
+    private void collectProbe(AccessibilityNodeInfo node, StringBuilder sb, int[] count) {
+        if (node == null || count[0] >= 16) {
+            return;
+        }
+        if (node.isClickable()) {
+            count[0]++;
+            sb.append("[")
+              .append(str(node.getContentDescription())).append("|")
+              .append(str(node.getText())).append("|")
+              .append(str(node.getViewIdResourceName()))
+              .append("] ");
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            collectProbe(node.getChild(i), sb, count);
         }
     }
 
