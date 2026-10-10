@@ -21,13 +21,59 @@ export const AutoDialer = registerPlugin<AutoDialerPlugin>('AutoDialer');
 
 export const isNative = Capacitor.isNativePlatform();
 
-// When running on Android via Capacitor, adb reverse forwards tcp:8765 to localhost:8765.
-// We try localhost:8765, with fallback to the host machine (x1carbon) over the LAN/tailnet.
+// The bridge daemon runs on the host machine. On the phone we reach it over the
+// network (Tailscale hostname first, then the LAN IP); localhost is kept as a
+// last resort for the USB + `adb reverse` dev setup.
 const BRIDGE_ENDPOINTS = isNative
-	? ['http://localhost:8765', 'http://x1carbon:8765']
+	? ['http://x1carbon:8765', 'http://10.80.0.48:8765', 'http://localhost:8765']
 	: [''];
 
-let activeBridgeUrl = isNative ? 'http://localhost:8765' : '';
+let activeBridgeUrl = isNative ? 'http://x1carbon:8765' : '';
+
+/** Forward the phone's native call state to the bridge (no USB/adb needed). */
+async function reportCallStateToBridge(state: 'OFFHOOK' | 'IDLE'): Promise<void> {
+	for (const base of (isNative ? [activeBridgeUrl, ...BRIDGE_ENDPOINTS].filter(Boolean) : [])) {
+		try {
+			const res = await fetch(`${base}/call/state`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ state }),
+				signal: AbortSignal.timeout(1500)
+			});
+			if (res.ok) return;
+		} catch {
+			// try next
+		}
+	}
+}
+
+let callStateForwardingReady = false;
+
+/** Subscribe to the native dialer so OFFHOOK/IDLE reach the bridge. */
+export async function registerCallStateForwarding(): Promise<void> {
+	if (!isNative || callStateForwardingReady) return;
+	callStateForwardingReady = true;
+	try {
+		await AutoDialer.addListener('callStateChange', (e) => {
+			if (e.state === 'OFFHOOK') void reportCallStateToBridge('OFFHOOK');
+			else if (e.state === 'IDLE') void reportCallStateToBridge('IDLE');
+		});
+	} catch (e) {
+		console.error('AutoDialer addListener failed:', e);
+	}
+}
+
+/** End the call using the phone's native dialer. */
+export async function endCallNatively(): Promise<boolean> {
+	if (!isNative) return false;
+	try {
+		await AutoDialer.endCall();
+		return true;
+	} catch (e) {
+		console.error('AutoDialer plugin endCall failed:', e);
+		return false;
+	}
+}
 
 /**
  * Triggers a call to the specified phone number.
@@ -65,6 +111,7 @@ export async function triggerCall(
 
 	// In native Capacitor environment, trigger the native ACTION_CALL intent
 	if (isNative) {
+		await registerCallStateForwarding();
 		try {
 			await AutoDialer.makeCall({ phone });
 			return true;
@@ -114,6 +161,7 @@ export async function pollCallStatus(): Promise<{
 	call_state: 'IDLE' | 'DIALING' | 'CONNECTED' | 'DISCONNECTING' | 'COMPLETED';
 	elapsed_seconds: number;
 	outcome?: string | null;
+	hangup_requested?: boolean;
 	current_phone?: string;
 	current_name?: string;
 }> {

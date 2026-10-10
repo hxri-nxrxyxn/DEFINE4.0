@@ -56,7 +56,11 @@ current_call_status = {
     "outcome": None,       # completed, declined, unanswered, error
     "last_error": None,
     "agent_active": False,  # ElevenLabs ConvAI agent attached to the line?
+    "hangup_requested": False,  # app should end the call natively
 }
+
+# App-reported call state (from the phone's native dialer when there's no USB/adb).
+app_call_state = {"offhook": False, "idle": False}
 
 # Event set by /end (the future auto-disconnect trigger) to stop the call loop.
 call_stop_event = None
@@ -275,9 +279,11 @@ def get_call_chunk_by_id(call_id, dump):
     return match.group(1) if match else ""
 
 
-def monitor_call_cycle(phone, name, duration_sec=0, native_dialed=False, script="", language=""):
+def _monitor_call_adb(phone, name, duration_sec=0, native_dialed=False, script="", language=""):
     global current_call_status, call_stop_event
     call_stop_event = threading.Event()
+    app_call_state["offhook"] = False
+    app_call_state["idle"] = False
     current_call_status["active"] = True
     current_call_status["current_phone"] = phone
     current_call_status["current_name"] = name
@@ -288,6 +294,7 @@ def monitor_call_cycle(phone, name, duration_sec=0, native_dialed=False, script=
     current_call_status["outcome"] = None
     current_call_status["last_error"] = None
     current_call_status["agent_active"] = False
+    current_call_status["hangup_requested"] = False
 
     # Point the ElevenLabs agent at the operator's template BEFORE it connects,
     # so it speaks the script typed in the UI instead of a stale message.
@@ -412,6 +419,118 @@ def monitor_call_cycle(phone, name, duration_sec=0, native_dialed=False, script=
         print(f"[✓] Call to {name} ({phone}) concluded ({current_call_status['outcome']}).", flush=True)
 
 
+def adb_available():
+    """True when a phone is attached via adb (USB). Enables the adb call path."""
+    try:
+        res = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=5)
+        for line in res.stdout.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
+    """No-USB flow: the app places the call natively; we attach the agent when
+    the Bluetooth hands-free link opens (or the app reports OFFHOOK), and finish
+    when the link closes or the app reports IDLE."""
+    global current_call_status, call_stop_event
+    call_stop_event = threading.Event()
+    app_call_state["offhook"] = False
+    app_call_state["idle"] = False
+    current_call_status.update({
+        "active": True,
+        "current_phone": phone,
+        "current_name": name,
+        "call_state": "DIALING",
+        "connected_time": None,
+        "elapsed_seconds": 0,
+        "target_duration": duration_sec,
+        "outcome": None,
+        "last_error": None,
+        "agent_active": False,
+        "hangup_requested": False,
+    })
+
+    if script and configure_call_agent is not None:
+        try:
+            configure_call_agent(script, name, language)
+        except Exception as e:
+            print(f"[agent] Could not configure ElevenLabs agent: {e}", flush=True)
+
+    print(
+        f"[*] (no USB) Waiting for the call to {name} ({phone}) over Bluetooth / app events...",
+        flush=True,
+    )
+    connected = False
+    saw_nodes = False
+    offhook_since = None
+    conn_start = None
+    connect_deadline = time.time() + 90.0
+
+    try:
+        while not call_stop_event.is_set():
+            time.sleep(0.4)
+            if app_call_state["idle"]:
+                print("[+] Call ended (app reported idle).", flush=True)
+                break
+
+            in_node, out_node, _ = discover_bluetooth_nodes()
+            nodes = bool(in_node and out_node)
+            if nodes:
+                saw_nodes = True
+
+            if not connected:
+                # Prefer the Bluetooth hands-free link (SCO opens when the call
+                # is answered). If the app reports OFFHOOK but the link never
+                # opens, attach on default audio after a short grace period.
+                if nodes:
+                    connected = True
+                elif app_call_state["offhook"]:
+                    if offhook_since is None:
+                        offhook_since = time.time()
+                    elif time.time() - offhook_since > 6.0:
+                        connected = True
+                if connected:
+                    conn_start = time.time()
+                    current_call_status["call_state"] = "CONNECTED"
+                    current_call_status["connected_time"] = time.time()
+                    print("[+] Call connected — attaching the agent.", flush=True)
+                    start_agent_when_ready(name, language)
+                elif time.time() > connect_deadline:
+                    print("[-] Timed out waiting for the call to connect.", flush=True)
+                    current_call_status["outcome"] = "unanswered"
+                    break
+            else:
+                current_call_status["elapsed_seconds"] = round(time.time() - conn_start, 1)
+                if saw_nodes and not nodes:
+                    print(
+                        f"[+] Call ended after {current_call_status['elapsed_seconds']}s "
+                        "(Bluetooth hands-free link closed).",
+                        flush=True,
+                    )
+                    break
+    finally:
+        stop_agent()
+        current_call_status["call_state"] = "COMPLETED"
+        if current_call_status["outcome"] is None:
+            current_call_status["outcome"] = "completed"
+        current_call_status["active"] = False
+        current_call_status["hangup_requested"] = False
+        print(f"[✓] Call to {name} ({phone}) concluded ({current_call_status['outcome']}).", flush=True)
+
+
+def monitor_call_cycle(phone, name, duration_sec=0, native_dialed=False, script="", language=""):
+    """Dispatch to the adb flow when a USB device is present, else the no-USB
+    (Bluetooth + app-driven) flow."""
+    if adb_available():
+        _monitor_call_adb(phone, name, duration_sec, native_dialed, script, language)
+    else:
+        monitor_call_bt(phone, name, duration_sec, script, language)
+
+
 class BridgeServer(http.server.BaseHTTPRequestHandler):
     def _send_json(self, data, code=200):
         body = json.dumps(data).encode("utf-8")
@@ -480,14 +599,27 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             self._send_json({"status": "started", "phone": phone, "name": name, "target_duration": duration})
 
         elif self.path == "/end":
-            # Interim external trigger point: the future auto-disconnect will call
-            # this same endpoint to terminate the call + agent without a human.
-            if call_stop_event is not None:
-                call_stop_event.set()
-            stop_agent()
-            end_call()
-            current_call_status["call_state"] = "COMPLETED"
-            self._send_json({"status": "ended"})
+            # External trigger to terminate the call + agent. With no USB we ask
+            # the app to end the call natively (it polls /status and sees
+            # hangup_requested); with adb attached we end it directly.
+            current_call_status["hangup_requested"] = True
+            if adb_available():
+                if call_stop_event is not None:
+                    call_stop_event.set()
+                end_call()
+                current_call_status["call_state"] = "COMPLETED"
+            self._send_json({"status": "ended", "hangup_requested": True})
+
+        elif self.path == "/call/state":
+            # The phone app forwards its native dialer state (no USB needed).
+            st = (data.get("state", "") or "").upper()
+            if st in ("OFFHOOK", "CONNECTED", "ACTIVE"):
+                app_call_state["offhook"] = True
+                app_call_state["idle"] = False
+            elif st in ("IDLE", "DISCONNECTED", "COMPLETED"):
+                app_call_state["idle"] = True
+                app_call_state["offhook"] = False
+            self._send_json({"ok": True, "state": st})
 
         elif self.path == "/agent/outcome":
             # Called by the agent subprocess when it has a definite outcome.
@@ -496,9 +628,12 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             if outcome:
                 current_call_status["outcome"] = outcome
             if end_now:
-                if call_stop_event is not None:
-                    call_stop_event.set()
-                end_call()
+                current_call_status["hangup_requested"] = True
+                stop_agent()
+                if adb_available():
+                    if call_stop_event is not None:
+                        call_stop_event.set()
+                    end_call()
                 current_call_status["call_state"] = "DISCONNECTING"
             self._send_json({
                 "ok": True,

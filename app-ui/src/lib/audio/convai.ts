@@ -87,8 +87,9 @@ export async function startConvAISession(
 	// 1. Get signed URL from backend or bridge
 	let signed_url = '';
 	const endpoints = [
-		'http://localhost:8765/api/convai/signed_url',
 		'http://x1carbon:8765/api/convai/signed_url',
+		'http://10.80.0.48:8765/api/convai/signed_url',
+		'http://localhost:8765/api/convai/signed_url',
 		apiUrl('/api/convai/signed_url')
 	];
 

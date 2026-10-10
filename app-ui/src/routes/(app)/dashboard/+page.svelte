@@ -10,7 +10,7 @@
 	import { campaign, type CallLogItem, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
 	import { subscribeCalls, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
-	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
+	import { triggerCall, terminateCall, pollCallStatus, endCallNatively, isNative } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Voicemail from '@lucide/svelte/icons/voicemail';
@@ -294,6 +294,13 @@
 			const status = await pollCallStatus();
 			const now = Date.now();
 			const timeSinceDial = (now - lastDialTimestamp) / 1000;
+
+			// No-USB: the bridge asks us to hang up (agent ended / DTMF outcome /
+			// /end); end the call with the phone's native dialer.
+			if (status.hangup_requested && isNative) {
+				await endCallNatively();
+				return;
+			}
 
 			// If connected
 			if (status.call_state === 'CONNECTED' || status.active) {
