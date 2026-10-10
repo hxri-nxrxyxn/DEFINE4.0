@@ -12,11 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "Bluetooth Audio Mode Manager",
-        "width": 640,
-        "height": 720,
-        "minWidth": 540,
-        "minHeight": 600,
+        "title": "Bluetooth Audio Mode",
+        "width": 520,
+        "height": 400,
+        "minWidth": 460,
+        "minHeight": 360,
         "resizable": true,
         "fullscreen": false,
         "center": true
