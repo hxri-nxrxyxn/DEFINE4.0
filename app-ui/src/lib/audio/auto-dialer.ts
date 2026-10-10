@@ -88,6 +88,7 @@ export async function endCallNatively(): Promise<boolean> {
 export async function startHangupWatcher(): Promise<void> {
 	if (!isNative) return;
 	try {
+		console.log('[auto-dialer] starting hangup watcher at', activeBridgeUrl);
 		await AutoDialer.startHangupWatcher({ url: activeBridgeUrl });
 	} catch (e) {
 		console.error('AutoDialer startHangupWatcher failed:', e);

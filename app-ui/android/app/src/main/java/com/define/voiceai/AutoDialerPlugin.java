@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.telecom.TelecomManager;
 import android.telephony.PhoneStateListener;
 import android.telephony.TelephonyCallback;
@@ -30,6 +31,7 @@ import java.net.URL;
 @CapacitorPlugin(name = "AutoDialer")
 public class AutoDialerPlugin extends Plugin {
 
+    private static final String TAG = "AutoDialer";
     private TelephonyManager telephonyManager;
     private TelecomManager telecomManager;
     private int currentCallState = TelephonyManager.CALL_STATE_IDLE;
@@ -127,23 +129,27 @@ public class AutoDialerPlugin extends Plugin {
 
     private boolean performHangup() {
         boolean ended = false;
+        boolean perm = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED;
+        Log.i(TAG, "performHangup: answeredPerm=" + perm + " sdk=" + Build.VERSION.SDK_INT + " telecom=" + (telecomManager != null));
         try {
-            if (telecomManager != null && ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
+            if (telecomManager != null && perm) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     ended = telecomManager.endCall();
                 }
             }
         } catch (Throwable t) {
-            t.printStackTrace();
+            Log.e(TAG, "telecomManager.endCall threw", t);
         }
 
         if (!ended) {
-            // Fallback attempt via Runtime keyevent 6
+            // Best-effort fallback (usually not permitted for a normal app).
             try {
                 Runtime.getRuntime().exec(new String[]{"input", "keyevent", "6"});
-                ended = true;
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+                Log.e(TAG, "keyevent fallback failed", ignore);
+            }
         }
+        Log.i(TAG, "performHangup result ended=" + ended);
 
         // Immediately re-assert screen wakefulness and return focus to MainActivity
         try {
@@ -225,12 +231,16 @@ public class AutoDialerPlugin extends Plugin {
         }
         hangupUrl = url.trim().replaceAll("/+$", "");
         hangupWatching = true;
+        Log.i(TAG, "startHangupWatcher url=" + hangupUrl);
         if (hangupThread == null || !hangupThread.isAlive()) {
             hangupThread = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    while (hangupWatching) {
-                        boolean stop = false;
+                    int attempts = 0;
+                    boolean loggedError = false;
+                    while (hangupWatching && attempts < 150) {
+                        attempts++;
+                        boolean done = false;
                         try {
                             HttpURLConnection conn = (HttpURLConnection) new URL(hangupUrl + "/status").openConnection();
                             conn.setConnectTimeout(2000);
@@ -245,23 +255,32 @@ public class AutoDialerPlugin extends Plugin {
                                 boolean active = o.optBoolean("active", false);
                                 boolean hangup = o.optBoolean("hangup_requested", false);
                                 String state = o.optString("call_state", "");
-                                if (hangup && (active || "DISCONNECTING".equals(state))) {
-                                    performHangup();
-                                    stop = true;
-                                } else if (!active && "COMPLETED".equals(state)) {
-                                    stop = true;
+                                if (!active && ("COMPLETED".equals(state) || "IDLE".equals(state))) {
+                                    done = true;
+                                } else if (hangup) {
+                                    Log.i(TAG, "watcher: hangup_requested active=" + active + " state=" + state + " -> performHangup");
+                                    timerHandler.post(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            performHangup();
+                                        }
+                                    });
                                 }
                             }
                         } catch (Throwable t) {
-                            // bridge momentarily unreachable — retry
+                            if (!loggedError) {
+                                loggedError = true;
+                                Log.e(TAG, "hangup watcher poll error", t);
+                            }
                         }
-                        if (stop) break;
+                        if (done) break;
                         try {
-                            Thread.sleep(1000);
+                            Thread.sleep(800);
                         } catch (InterruptedException e) {
                             break;
                         }
                     }
+                    Log.i(TAG, "hangup watcher stopped after " + attempts + " attempts");
                     hangupWatching = false;
                 }
             });
