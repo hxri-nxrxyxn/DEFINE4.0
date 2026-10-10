@@ -656,7 +656,7 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                     def _auto_end():
                         if current_call_status.get("active"):
                             current_call_status["hangup_requested"] = True
-                    threading.Timer(18.0, _auto_end).start()
+                    threading.Timer(45.0, _auto_end).start()
             if end_now:
                 current_call_status["hangup_requested"] = True
                 # Do NOT kill the agent here — let it finish its closing line.

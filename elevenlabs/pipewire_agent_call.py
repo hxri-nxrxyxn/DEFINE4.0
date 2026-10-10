@@ -575,6 +575,7 @@ class PermanentCallSession:
         self.outcome: Optional[str] = None
         self.outcome_reported: bool = False
         self.end_signalled: bool = False
+        self._hangup_scheduled: bool = False
         self._fallback_task: Optional[asyncio.Task] = None
         # The conversation session (initiation) is started either when the
         # recipient first speaks or after `init_wait` seconds of silence.
@@ -805,7 +806,10 @@ class PermanentCallSession:
                     if tool_name == "report_outcome":
                         await self._record_outcome(params.get("outcome"))
                     elif tool_name == "end_conversation":
-                        await self._end_call_from_agent()
+                        # Spawn (don't await) so the receive loop keeps pulling the
+                        # closing line's audio; the task waits for playback to drain
+                        # before asking the bridge to hang up.
+                        asyncio.create_task(self._hang_up_after_speech())
                     try:
                         await ws.send(json.dumps({
                             "type": "client_tool_result",
@@ -911,20 +915,66 @@ class PermanentCallSession:
                 return
             if not self.end_signalled:
                 print(f"\n  {YELLOW}⏱️  [Fallback] Ending call after acknowledgement window.{RESET}")
-                await self._end_call_from_agent()
+                await self._hang_up_after_speech()
 
         self._fallback_task = asyncio.create_task(_later())
 
-    async def _end_call_from_agent(self) -> None:
-        """Tell the bridge to hang up the phone call from our side."""
-        if self.end_signalled:
+    async def _wait_for_speech_drain(self, max_wait: float = 40.0) -> None:
+        """Block until the agent's closing speech has finished playing out.
+
+        The `end_conversation` tool call can arrive a moment before (or during)
+        the streamed audio for the closing line, so we wait until audio has both
+        started and then gone quiet, rather than just testing the queue once.
+        """
+        start = time.time()
+        deadline = start + max_wait
+        saw_audio = False
+        quiet_since = None
+        try:
+            while time.time() < deadline:
+                playing = self.player.is_playing or (not self.player.queue.empty())
+                if playing:
+                    saw_audio = True
+                    quiet_since = None
+                else:
+                    if quiet_since is None:
+                        quiet_since = time.time()
+                    quiet = time.time() - quiet_since
+                    if saw_audio and quiet >= 1.5:
+                        break  # closing line played and finished
+                    if (not saw_audio) and (time.time() - start) >= 6.0:
+                        break  # no closing audio ever arrived; don't stall forever
+                await asyncio.sleep(0.15)
+            # A small tail so the very last chunk has time to render on the line.
+            await asyncio.sleep(1.0)
+        except Exception:
+            pass
+
+    async def _hang_up_after_speech(self) -> None:
+        """End the phone call — but only once the closing line has finished playing.
+
+        The ElevenLabs `end_conversation` tool call arrives as soon as the LLM
+        decides to finish, which is usually *while* the audio for that closing
+        line is still streaming to us. So we wait for our playback buffer to
+        drain, then ask the bridge to hang up.
+        """
+        if self._hangup_scheduled:
             return
+        self._hangup_scheduled = True
         self.end_signalled = True
+
+        # Stop the fallback timer (it may be what invoked us).
+        if self._fallback_task and not self._fallback_task.done():
+            self._fallback_task.cancel()
+
+        await self._wait_for_speech_drain()
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None, self._post_to_bridge, "/agent/outcome",
             {"outcome": self.outcome or "", "end": True},
         )
+        print(f"\n  {GREEN}👋 [Goodbye complete]{RESET} — asked the phone to end the call")
         self.running = False
 
     async def cleanup(self):
