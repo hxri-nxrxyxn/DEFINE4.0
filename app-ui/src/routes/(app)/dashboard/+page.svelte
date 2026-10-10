@@ -214,6 +214,7 @@
 	let isExecutingStep = false;
 	let lastDialTimestamp = 0;
 	let callRegisteredActive = false;
+	let hangupSent = false;
 
 	const HIPAA_DISCLAIMER_PREFIX =
 		"Notice: Under ABDM and DPDP healthcare rules, this call is processed securely by AI. Number masking is active, carrier recordings are purged, and data is kept in Indian datacenters. Your ABHA number will never be shared. By continuing, you agree to voice data processing.";
@@ -261,6 +262,7 @@
 			campaign.currentCallDurationSec = 0;
 			lastDialTimestamp = Date.now();
 			callRegisteredActive = false;
+			hangupSent = false;
 
 			const formattedScript = formatScriptForRecipient(campaign.templateText, current.name);
 
@@ -297,9 +299,9 @@
 
 			// No-USB: the bridge asks us to hang up (agent ended / DTMF outcome /
 			// /end); end the call with the phone's native dialer.
-			if (status.hangup_requested && isNative && status.active) {
+			if (status.hangup_requested && isNative && !hangupSent) {
+				hangupSent = true;
 				await endCallNatively();
-				return;
 			}
 
 			// If connected

@@ -467,6 +467,7 @@ def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
     connected = False
     saw_nodes = False
     offhook_since = None
+    hangup_since = None
     conn_start = None
     connect_deadline = time.time() + 90.0
 
@@ -476,6 +477,18 @@ def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
             if app_call_state["idle"]:
                 print("[+] Call ended (app reported idle).", flush=True)
                 break
+
+            # When a hang-up is requested (agent ended / DTMF outcome / /end) we
+            # wait for the app to end the call natively, instead of treating the
+            # Bluetooth link drop (caused by stopping the agent) as the end.
+            if current_call_status.get("hangup_requested"):
+                if hangup_since is None:
+                    hangup_since = time.time()
+                elif time.time() - hangup_since > 25.0:
+                    print("[!] Hang-up request not honoured by the app; concluding.", flush=True)
+                    break
+            else:
+                hangup_since = None
 
             in_node, out_node, _ = discover_bluetooth_nodes()
             nodes = bool(in_node and out_node)
@@ -505,7 +518,7 @@ def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
                     break
             else:
                 current_call_status["elapsed_seconds"] = round(time.time() - conn_start, 1)
-                if saw_nodes and not nodes:
+                if saw_nodes and not nodes and not current_call_status.get("hangup_requested"):
                     print(
                         f"[+] Call ended after {current_call_status['elapsed_seconds']}s "
                         "(Bluetooth hands-free link closed).",
@@ -518,7 +531,6 @@ def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
         if current_call_status["outcome"] is None:
             current_call_status["outcome"] = "completed"
         current_call_status["active"] = False
-        current_call_status["hangup_requested"] = False
         print(f"[✓] Call to {name} ({phone}) concluded ({current_call_status['outcome']}).", flush=True)
 
 
