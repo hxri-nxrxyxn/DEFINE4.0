@@ -25,10 +25,10 @@ export const isNative = Capacitor.isNativePlatform();
 // network (Tailscale hostname first, then the LAN IP); localhost is kept as a
 // last resort for the USB + `adb reverse` dev setup.
 const BRIDGE_ENDPOINTS = isNative
-	? ['http://x1carbon:8765', 'http://10.80.0.48:8765', 'http://localhost:8765']
+	? ['http://10.80.0.48:8765', 'http://x1carbon:8765', 'http://localhost:8765']
 	: [''];
 
-let activeBridgeUrl = isNative ? 'http://x1carbon:8765' : '';
+let activeBridgeUrl = isNative ? 'http://10.80.0.48:8765' : '';
 
 /** Forward the phone's native call state to the bridge (no USB/adb needed). */
 async function reportCallStateToBridge(state: 'OFFHOOK' | 'IDLE'): Promise<void> {
