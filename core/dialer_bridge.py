@@ -659,7 +659,10 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                     threading.Timer(18.0, _auto_end).start()
             if end_now:
                 current_call_status["hangup_requested"] = True
-                stop_agent()
+                # Do NOT kill the agent here — let it finish its closing line.
+                # Ending the call below stops its audio; the agent also exits on
+                # its own once the conversation is over. The monitoring loop's
+                # finally block stops it as a last resort.
                 if adb_available():
                     if call_stop_event is not None:
                         call_stop_event.set()

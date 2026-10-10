@@ -10,7 +10,7 @@
 	import { campaign, type CallLogItem, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
 	import { subscribeCalls, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
-	import { triggerCall, terminateCall, pollCallStatus, endCallNatively, isNative } from '#lib/audio/auto-dialer.js';
+	import { triggerCall, terminateCall, pollCallStatus, endCallNatively, isNative, isEndCallAccessibilityEnabled, openAccessibilitySettings } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import Voicemail from '@lucide/svelte/icons/voicemail';
@@ -215,6 +215,7 @@
 	let lastDialTimestamp = 0;
 	let callRegisteredActive = false;
 	let hangupSent = false;
+	let accessibilityPrompted = false;
 
 	const HIPAA_DISCLAIMER_PREFIX =
 		"Notice: Under ABDM and DPDP healthcare rules, this call is processed securely by AI. Number masking is active, carrier recordings are purged, and data is kept in Indian datacenters. Your ABHA number will never be shared. By continuing, you agree to voice data processing.";
@@ -235,6 +236,24 @@
 
 	async function runAutoDialerLoop() {
 		if (!campaign.isCampaignRunning || isExecutingStep) return;
+
+		// On native Android the call can only be ended via the accessibility
+		// "End call" tap (HONOR refuses TelecomManager.endCall()). Make sure it
+		// is enabled before we start placing calls.
+		if (isNative) {
+			const enabled = await isEndCallAccessibilityEnabled();
+			if (!enabled) {
+				if (!accessibilityPrompted) {
+					accessibilityPrompted = true;
+					toast.warning('Enable "Define Voice AI" in Accessibility', {
+						description: 'It lets the app hang up the call automatically. Opening Settings — turn it on, then press Start again.'
+					});
+					await openAccessibilitySettings();
+				}
+				campaign.isCampaignRunning = false;
+				return;
+			}
+		}
 
 		const roster = campaign.recipients;
 		if (!roster || roster.length === 0) {

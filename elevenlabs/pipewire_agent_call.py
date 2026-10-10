@@ -898,7 +898,7 @@ class PermanentCallSession:
             pass
         self._schedule_fallback_end()
 
-    def _schedule_fallback_end(self, delay: float = 12.0) -> None:
+    def _schedule_fallback_end(self, delay: float = 25.0) -> None:
         """Guarantee we disconnect from our side even if the agent never calls end_call.
         Kept long enough that the agent can finish its spoken goodbye first."""
         if self._fallback_task and not self._fallback_task.done():
@@ -938,6 +938,21 @@ class PermanentCallSession:
                 self.record_proc.terminate()
             except Exception:
                 pass
+
+        # Let any buffered goodbye audio finish playing before we tear the
+        # audio link down, so the agent is not cut off mid-sentence.
+        try:
+            for _ in range(60):  # up to ~15s
+                try:
+                    drained = (not self.player.is_playing) and self.player.queue.empty()
+                except Exception:
+                    drained = True
+                if drained:
+                    break
+                await asyncio.sleep(0.25)
+            await asyncio.sleep(0.8)  # small tail for the last chunk to render
+        except Exception:
+            pass
 
         await self.player.stop()
 

@@ -176,8 +176,18 @@ public class AutoDialerPlugin extends Plugin {
             }
         }
 
-        postDiag("hangup_result", "ended=" + ended + " perm=" + perm + " state=" + currentCallState);
-        Log.i(TAG, "performHangup result ended=" + ended);
+        boolean accRequested = false;
+        if (!ended) {
+            // HONOR (and some other ROMs) refuse TelecomManager.endCall() from a
+            // non-default-dialer app. Fall back to tapping the real in-call
+            // "End call" button through the accessibility service.
+            accRequested = EndCallAccessibilityService.requestEndCall();
+        }
+
+        postDiag("hangup_result", "ended=" + ended + " accReq=" + accRequested
+                + " accOn=" + EndCallAccessibilityService.isConnected()
+                + " perm=" + perm + " state=" + currentCallState);
+        Log.i(TAG, "performHangup result ended=" + ended + " accReq=" + accRequested);
 
         // Immediately re-assert screen wakefulness and return focus to MainActivity
         try {
@@ -291,7 +301,6 @@ public class AutoDialerPlugin extends Plugin {
                 int attempts = 0;
                 boolean loggedError = false;
                 boolean sawActive = false;
-                boolean fronted = false;
                 while (hangupWatching && attempts < 1200) {
                     attempts++;
                     boolean done = false;
@@ -315,14 +324,15 @@ public class AutoDialerPlugin extends Plugin {
                             }
 
                             if (hangup) {
-                                final boolean bringFront = !fronted;
-                                fronted = true;
                                 Log.i(TAG, "watcher: hangup_requested active=" + active + " state=" + state + " -> performHangup");
                                 postDiag("hangup_detected", "active=" + active + " state=" + state);
                                 timerHandler.post(new Runnable() {
                                     @Override
                                     public void run() {
-                                        performHangup(bringFront);
+                                        // Do NOT raise our app here: the in-call
+                                        // UI must stay foreground so the
+                                        // accessibility service can tap End.
+                                        performHangup(false);
                                     }
                                 });
                             }
@@ -419,6 +429,25 @@ public class AutoDialerPlugin extends Plugin {
     @PluginMethod
     public void stopHangupWatcher(PluginCall call) {
         hangupWatching = false;
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void isAccessibilityEnabled(PluginCall call) {
+        JSObject res = new JSObject();
+        res.put("enabled", EndCallAccessibilityService.isConnected());
+        call.resolve(res);
+    }
+
+    @PluginMethod
+    public void openAccessibilitySettings(PluginCall call) {
+        try {
+            Intent i = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Throwable t) {
+            Log.e(TAG, "openAccessibilitySettings failed", t);
+        }
         call.resolve();
     }
 

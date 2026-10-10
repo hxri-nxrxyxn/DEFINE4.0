@@ -4,4 +4,5 @@
     <string name="title_activity_main">Define Voice AI</string>
     <string name="package_name">com.define.voiceai</string>
     <string name="custom_url_scheme">com.define.voiceai</string>
+    <string name="accessibility_service_description">Lets Define Voice AI end an automated outbound call when the AI conversation finishes.</string>
 </resources>

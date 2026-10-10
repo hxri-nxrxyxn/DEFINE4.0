@@ -13,6 +13,8 @@ export interface AutoDialerPlugin {
 	getCallState(): Promise<{ state: string; stateCode: number; elapsedSeconds: number }>;
 	startHangupWatcher(options: { url: string }): Promise<void>;
 	stopHangupWatcher(): Promise<void>;
+	isAccessibilityEnabled(): Promise<{ enabled: boolean }>;
+	openAccessibilitySettings(): Promise<void>;
 	addListener(
 		eventName: 'callStateChange',
 		listenerFunc: (event: CallStateEvent) => void
@@ -99,6 +101,30 @@ export async function stopHangupWatcher(): Promise<void> {
 	if (!isNative) return;
 	try {
 		await AutoDialer.stopHangupWatcher();
+	} catch {
+		// ignore
+	}
+}
+
+/**
+ * The HONOR ROM refuses TelecomManager.endCall() from a non-default-dialer app,
+ * so the app taps the in-call "End call" button via an accessibility service.
+ * Returns whether that service is currently enabled.
+ */
+export async function isEndCallAccessibilityEnabled(): Promise<boolean> {
+	if (!isNative) return true;
+	try {
+		const res = await AutoDialer.isAccessibilityEnabled();
+		return !!res?.enabled;
+	} catch {
+		return false;
+	}
+}
+
+export async function openAccessibilitySettings(): Promise<void> {
+	if (!isNative) return;
+	try {
+		await AutoDialer.openAccessibilitySettings();
 	} catch {
 		// ignore
 	}
