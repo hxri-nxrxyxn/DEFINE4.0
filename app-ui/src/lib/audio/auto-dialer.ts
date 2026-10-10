@@ -11,6 +11,8 @@ export interface AutoDialerPlugin {
 	makeCall(options: { phone: string; duration?: number }): Promise<{ status: string; phone: string; targetDuration: number }>;
 	endCall(): Promise<{ ended: boolean; stateCode: number }>;
 	getCallState(): Promise<{ state: string; stateCode: number; elapsedSeconds: number }>;
+	startHangupWatcher(options: { url: string }): Promise<void>;
+	stopHangupWatcher(): Promise<void>;
 	addListener(
 		eventName: 'callStateChange',
 		listenerFunc: (event: CallStateEvent) => void
@@ -55,8 +57,12 @@ export async function registerCallStateForwarding(): Promise<void> {
 	callStateForwardingReady = true;
 	try {
 		await AutoDialer.addListener('callStateChange', (e) => {
-			if (e.state === 'OFFHOOK') void reportCallStateToBridge('OFFHOOK');
-			else if (e.state === 'IDLE') void reportCallStateToBridge('IDLE');
+			if (e.state === 'OFFHOOK') {
+				void reportCallStateToBridge('OFFHOOK');
+			} else if (e.state === 'IDLE') {
+				void reportCallStateToBridge('IDLE');
+				void stopHangupWatcher();
+			}
 		});
 	} catch (e) {
 		console.error('AutoDialer addListener failed:', e);
@@ -72,6 +78,28 @@ export async function endCallNatively(): Promise<boolean> {
 	} catch (e) {
 		console.error('AutoDialer plugin endCall failed:', e);
 		return false;
+	}
+}
+
+/**
+ * Start a native background watcher that polls the bridge and ends the call when
+ * a hang-up is requested — even if the WebView is backgrounded during the call.
+ */
+export async function startHangupWatcher(): Promise<void> {
+	if (!isNative) return;
+	try {
+		await AutoDialer.startHangupWatcher({ url: activeBridgeUrl });
+	} catch (e) {
+		console.error('AutoDialer startHangupWatcher failed:', e);
+	}
+}
+
+export async function stopHangupWatcher(): Promise<void> {
+	if (!isNative) return;
+	try {
+		await AutoDialer.stopHangupWatcher();
+	} catch {
+		// ignore
 	}
 }
 
@@ -114,6 +142,7 @@ export async function triggerCall(
 		await registerCallStateForwarding();
 		try {
 			await AutoDialer.makeCall({ phone });
+			await startHangupWatcher();
 			return true;
 		} catch (e) {
 			console.error('AutoDialer plugin makeCall failed:', e);
@@ -133,6 +162,7 @@ export async function terminateCall(): Promise<boolean> {
 		} catch (e) {
 			console.error('AutoDialer plugin endCall failed:', e);
 		}
+		await stopHangupWatcher();
 	}
 
 	const endpoints = isNative ? [activeBridgeUrl, ...BRIDGE_ENDPOINTS].filter(Boolean) : [''];

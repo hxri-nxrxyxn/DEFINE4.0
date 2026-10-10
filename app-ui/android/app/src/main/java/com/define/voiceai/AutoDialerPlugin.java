@@ -20,6 +20,13 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+
 @CapacitorPlugin(name = "AutoDialer")
 public class AutoDialerPlugin extends Plugin {
 
@@ -31,6 +38,12 @@ public class AutoDialerPlugin extends Plugin {
     private long callPickupTimestamp = 0;
     private int targetDurationSeconds = 10;
     private boolean isOffhook = false;
+
+    // Background watcher: polls the bridge and ends the call even when the
+    // WebView (and its JS timers) is backgrounded during the call.
+    private Thread hangupThread = null;
+    private volatile boolean hangupWatching = false;
+    private String hangupUrl = null;
 
     @RequiresApi(api = Build.VERSION_CODES.S)
     private static class Api31Callback extends TelephonyCallback implements TelephonyCallback.CallStateListener {
@@ -201,6 +214,67 @@ public class AutoDialerPlugin extends Plugin {
         res.put("ended", ended);
         res.put("stateCode", currentCallState);
         call.resolve(res);
+    }
+
+    @PluginMethod
+    public void startHangupWatcher(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.trim().isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        hangupUrl = url.trim().replaceAll("/+$", "");
+        hangupWatching = true;
+        if (hangupThread == null || !hangupThread.isAlive()) {
+            hangupThread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    while (hangupWatching) {
+                        boolean stop = false;
+                        try {
+                            HttpURLConnection conn = (HttpURLConnection) new URL(hangupUrl + "/status").openConnection();
+                            conn.setConnectTimeout(2000);
+                            conn.setReadTimeout(2000);
+                            if (conn.getResponseCode() == 200) {
+                                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                                StringBuilder sb = new StringBuilder();
+                                String line;
+                                while ((line = reader.readLine()) != null) sb.append(line);
+                                reader.close();
+                                JSONObject o = new JSONObject(sb.toString());
+                                boolean active = o.optBoolean("active", false);
+                                boolean hangup = o.optBoolean("hangup_requested", false);
+                                String state = o.optString("call_state", "");
+                                if (hangup && (active || "DISCONNECTING".equals(state))) {
+                                    performHangup();
+                                    stop = true;
+                                } else if (!active && "COMPLETED".equals(state)) {
+                                    stop = true;
+                                }
+                            }
+                        } catch (Throwable t) {
+                            // bridge momentarily unreachable — retry
+                        }
+                        if (stop) break;
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+                    hangupWatching = false;
+                }
+            });
+            hangupThread.setDaemon(true);
+            hangupThread.start();
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopHangupWatcher(PluginCall call) {
+        hangupWatching = false;
+        call.resolve();
     }
 
     @PluginMethod

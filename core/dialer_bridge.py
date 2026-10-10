@@ -640,6 +640,14 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             end_now = bool(data.get("end", False))
             if outcome:
                 current_call_status["outcome"] = outcome
+                if not end_now:
+                    # The agent reported the outcome but hasn't explicitly ended
+                    # the conversation yet — give it a moment to say goodbye,
+                    # then request the hang-up anyway.
+                    def _auto_end():
+                        if current_call_status.get("active"):
+                            current_call_status["hangup_requested"] = True
+                    threading.Timer(5.0, _auto_end).start()
             if end_now:
                 current_call_status["hangup_requested"] = True
                 stop_agent()
