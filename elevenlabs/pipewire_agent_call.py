@@ -334,9 +334,9 @@ class DTMFDetector:
         self,
         sample_rate: int = 16000,
         frame_duration_ms: int = 30,
-        min_frames: int = 2,
-        dominance: float = 0.5,
-        min_rms: float = 120.0,
+        min_frames: int = 3,
+        dominance: float = 0.6,
+        min_rms: float = 200.0,
     ):
         self.sample_rate = sample_rate
         self.frame_bytes = int(sample_rate * (frame_duration_ms / 1000.0) * 2)
@@ -536,6 +536,9 @@ class PermanentCallSession:
         hangover_ms: int = 650,
         isolate_links: bool = True,
         bridge_url: str = "http://127.0.0.1:8765",
+        caller_name: Optional[str] = None,
+        caller_language: Optional[str] = None,
+        init_wait: float = 3.0,
     ):
         self.api_key = api_key
         self.agent_id = agent_id
@@ -547,6 +550,9 @@ class PermanentCallSession:
         self.hangover_ms = hangover_ms
         self.isolate_links = isolate_links
         self.bridge_url = bridge_url
+        self.caller_name = caller_name
+        self.caller_language = caller_language
+        self.init_wait = init_wait
 
         self.link_manager = BluetoothLinkManager(input_target, output_target)
         self.player = AudioPlaybackWorker(output_target, sample_rate=16000)
@@ -570,6 +576,9 @@ class PermanentCallSession:
         self.outcome_reported: bool = False
         self.end_signalled: bool = False
         self._fallback_task: Optional[asyncio.Task] = None
+        # The conversation session (initiation) is started either when the
+        # recipient first speaks or after `init_wait` seconds of silence.
+        self._initiated: bool = False
 
     def print_banner(self):
         print(f"\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════════════════════╗{RESET}")
@@ -644,6 +653,7 @@ class PermanentCallSession:
             )
 
             # Start concurrent audio capture, server event listener, and device liveness monitor
+            self._initiated = False
             capture_task = asyncio.create_task(self._capture_audio_loop(ws))
             events_task = asyncio.create_task(self._handle_server_events(ws))
             liveness_task = asyncio.create_task(self._monitor_device_liveness())
@@ -680,6 +690,7 @@ class PermanentCallSession:
         """Reads audio from PipeWire pw-record, runs VAD, streams speech chunks to WebSocket."""
         frame_bytes = self.vad_processor.frame_bytes
         loop = asyncio.get_running_loop()
+        init_deadline = time.time() + self.init_wait
 
         while self.running:
             if not self.record_proc or not self.record_proc.stdout:
@@ -693,6 +704,22 @@ class PermanentCallSession:
                     continue
             except Exception:
                 break
+
+            # Before the session is started, wait up to init_wait seconds for the
+            # recipient to speak. If they stay silent, start the session so the
+            # bot introduces itself (rather than leaving a dead-air gap).
+            if not self._initiated:
+                samples = np.frombuffer(raw_chunk, dtype="<i2").astype(np.float32)
+                pre_rms = float(np.sqrt(np.mean(samples ** 2))) if samples.size else 0.0
+                now = time.time()
+                if now - self.last_status_time > 0.25:
+                    self.last_status_time = now
+                    left = max(0.0, init_deadline - now)
+                    sys.stdout.write(f"\r  {DIM}waiting for recipient… {left:0.1f}s{RESET}   ")
+                    sys.stdout.flush()
+                if pre_rms >= self.rms_threshold or now >= init_deadline:
+                    await self._send_initiation(ws)
+                continue
 
             # Keypad capture (recipient pressing 1/2/9 on their phone).
             digit = self.dtmf.process(raw_chunk)
@@ -809,6 +836,25 @@ class PermanentCallSession:
         except Exception as e:
             print(f"{YELLOW}[!] Could not reach bridge ({path}): {e}{RESET}")
 
+    async def _send_initiation(self, ws: Any) -> None:
+        """Start the ElevenLabs session so the agent delivers its first message."""
+        if self._initiated:
+            return
+        self._initiated = True
+        dyn: Dict[str, str] = {}
+        if self.caller_name:
+            dyn["name"] = self.caller_name
+        if self.caller_language:
+            dyn["language"] = self.caller_language
+        try:
+            await ws.send(json.dumps({
+                "type": "conversation_initiation_client_data",
+                "dynamic_variables": dyn,
+            }))
+            print(f"\n  {GREEN}▶ [Session started]{RESET} — the bot will introduce itself now\n")
+        except Exception:
+            pass
+
     async def _record_outcome(self, outcome: Optional[str]) -> None:
         """Record the outcome with the bridge (does NOT hang up the call)."""
         if not outcome or self.outcome_reported:
@@ -913,6 +959,9 @@ class WirePlumberExportWatcher:
         isolate_links: bool = True,
         check_interval_sec: float = 0.8,
         bridge_url: str = "http://127.0.0.1:8765",
+        caller_name: Optional[str] = None,
+        caller_language: Optional[str] = None,
+        init_wait: float = 3.0,
     ):
         self.api_key = api_key
         self.agent_id = agent_id
@@ -922,6 +971,9 @@ class WirePlumberExportWatcher:
         self.isolate_links = isolate_links
         self.check_interval_sec = check_interval_sec
         self.bridge_url = bridge_url
+        self.caller_name = caller_name
+        self.caller_language = caller_language
+        self.init_wait = init_wait
         self.running = True
         self.active_session: Optional[PermanentCallSession] = None
 
@@ -954,6 +1006,9 @@ class WirePlumberExportWatcher:
                     hangover_ms=self.hangover_ms,
                     isolate_links=self.isolate_links,
                     bridge_url=self.bridge_url,
+                    caller_name=self.caller_name,
+                    caller_language=self.caller_language,
+                    init_wait=self.init_wait,
                 )
                 self.active_session = session
 
@@ -996,6 +1051,9 @@ def main():
     parser.add_argument("--no-isolate", action="store_true", help="Do not isolate Bluetooth from laptop ALSA mic/speakers")
     parser.add_argument("--default-audio", action="store_true", help="Use default PipeWire audio instead of Bluetooth nodes")
     parser.add_argument("--bridge-url", default="http://127.0.0.1:8765", help="Dialer bridge URL for outcome reporting (default: http://127.0.0.1:8765)")
+    parser.add_argument("--name", default=None, help="Recipient name (dynamic variable for the agent)")
+    parser.add_argument("--language", default=None, help="Recipient language for the agent (e.g. Malayalam)")
+    parser.add_argument("--init-wait", type=float, default=3.0, help="Seconds to wait for the recipient to speak before the bot greets (default 3.0)")
     args = parser.parse_args()
 
     api_key, agent_id = load_credentials()
@@ -1034,6 +1092,9 @@ def main():
             hangover_ms=args.hangover_ms,
             isolate_links=not args.no_isolate,
             bridge_url=args.bridge_url,
+            caller_name=args.name,
+            caller_language=args.language,
+            init_wait=args.init_wait,
         )
 
         def sig_handler(sig, frame):
@@ -1062,6 +1123,9 @@ def main():
             hangover_ms=args.hangover_ms,
             isolate_links=not args.no_isolate,
             bridge_url=args.bridge_url,
+            caller_name=args.name,
+            caller_language=args.language,
+            init_wait=args.init_wait,
         )
 
         def sig_handler(sig, frame):

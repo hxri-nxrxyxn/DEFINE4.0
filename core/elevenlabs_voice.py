@@ -76,6 +76,9 @@ LANG_CODES: Dict[str, str] = {
     "bengali": "bn",
 }
 
+# Languages the agent is allowed to switch between mid-conversation.
+SUPPORTED_LANGUAGES = ["en", "hi", "ta", "te", "ml", "mr", "kn", "bn"]
+
 
 def _build_call_first_message(script: str, name: Optional[str] = None) -> str:
     base = (script or "").strip()
@@ -83,15 +86,20 @@ def _build_call_first_message(script: str, name: Optional[str] = None) -> str:
         # Keep a {{name}} placeholder if the script still has one, otherwise the
         # caller has already rendered the recipient's name into the script.
         base = re.sub(r"\{\s*name\s*\}", "{{name}}", base, flags=re.IGNORECASE)
-        return base
-    if name:
-        return (
-            f"Hello {name}, this is DEFINE Voice AI calling with an important "
-            "update. Do you have a moment?"
-        )
+
+    who = name or "{{name}}"
+    if base:
+        # Always self-introduce first, no matter what the template is. If the
+        # template already opens with a greeting, just add the intro line.
+        if re.match(r"^\s*(hello|hi|hey|namaste|namaskar|namaskaram|good\s+(morning|afternoon|evening))\b", base, re.IGNORECASE):
+            intro = "This is DEFINE Voice AI calling."
+        else:
+            intro = f"Hello {who}, this is DEFINE Voice AI calling."
+        return f"{intro} {base}"
+
     return (
-        "Hello, this is DEFINE Voice AI calling with an important update. "
-        "Do you have a moment?"
+        f"Hello {who}, this is DEFINE Voice AI calling with an important "
+        "update. Do you have a moment?"
     )
 
 
@@ -110,14 +118,15 @@ def _build_call_prompt(script: str) -> str:
             "You are a polite, natural outbound voice agent for DEFINE.",
             "The recipient's name is {{name}}. Greet them warmly by name.",
             context,
+            "Reply in the SAME language the recipient is currently speaking. If they switch language, switch with them immediately.",
             "Answer their questions and keep the conversation natural and brief.",
-            "If the script asks the recipient to press a key (1 to confirm, 2 to reschedule, 9 to opt out), that is handled automatically — you do not need to ask for it again.",
-            "As soon as the outcome is clear, call the report_outcome tool exactly once:",
-            "- confirmed: the recipient agreed, confirmed, or will attend.",
-            "- reschedule: the recipient wants to reschedule or be called again later.",
+            "If the script asks the recipient to press a key (1 to confirm, 2 to reschedule, 9 to opt out), the keypad is captured automatically — do not ask for it again, and never claim they confirmed.",
+            "IMPORTANT: never assume or invent the recipient's decision. A greeting like 'hello' is NOT a confirmation. Only call report_outcome once the recipient has explicitly stated their choice (or a keypad digit was pressed):",
+            "- confirmed: the recipient explicitly agreed, confirmed, or will attend.",
+            "- reschedule: the recipient explicitly asked to reschedule or be called again later.",
             "- not_available: the recipient is busy or cannot talk right now.",
-            "- declined: the recipient says no or is not interested.",
-            "- opt_out: the recipient asks to stop being called.",
+            "- declined: the recipient explicitly said no or is not interested.",
+            "- opt_out: the recipient explicitly asked to stop being called.",
             "After reporting the outcome, say one short closing line, then call the end_conversation tool to hang up.",
         ]
     )
@@ -167,6 +176,14 @@ _END_CALL_TOOL = {
     },
 }
 
+# System tool that lets the agent switch language when the caller does.
+_LANGUAGE_DETECTION_TOOL = {
+    "type": "system",
+    "name": "language_detection",
+    "description": "",
+    "params": {"system_tool_type": "language_detection"},
+}
+
 
 def configure_call_agent(
     script: str,
@@ -189,14 +206,26 @@ def configure_call_agent(
             "agent": {
                 "first_message": first_message,
                 "language": lang_code,
+                "disable_first_message_interruptions": True,
                 "dynamic_variables": {
                     "dynamic_variable_placeholders": {"name": name or "there"}
                 },
                 "prompt": {
                     "prompt": prompt_text,
-                    "tools": [_REPORT_OUTCOME_TOOL, _END_CALL_TOOL],
+                    "tools": [
+                        _REPORT_OUTCOME_TOOL,
+                        _END_CALL_TOOL,
+                        _LANGUAGE_DETECTION_TOOL,
+                    ],
                 },
-            }
+            },
+            # Register the switchable languages so the language_detection tool
+            # can adapt when the caller changes language mid-conversation.
+            "language_presets": {
+                code: {"overrides": {"agent": {"first_message": first_message}}}
+                for code in SUPPORTED_LANGUAGES
+                if code != lang_code
+            },
         }
     }
 

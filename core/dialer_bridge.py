@@ -112,7 +112,7 @@ def discover_bluetooth_nodes():
     return bt_input, bt_output, device_desc
 
 
-def start_agent(input_target=None, output_target=None):
+def start_agent(input_target=None, output_target=None, name=None, language=None):
     """Launch the ElevenLabs ConvAI agent bound to the call audio."""
     global _agent_process
     with _agent_lock:
@@ -128,6 +128,10 @@ def start_agent(input_target=None, output_target=None):
 
         cmd = [ELEVENLABS_PYTHON, ELEVENLABS_AGENT_SCRIPT, "--direct"]
         cmd += ["--bridge-url", f"http://127.0.0.1:{PORT}"]
+        if name:
+            cmd += ["--name", name]
+        if language:
+            cmd += ["--language", language]
         if input_target:
             cmd += ["--input-target", input_target]
         if output_target:
@@ -145,7 +149,7 @@ def start_agent(input_target=None, output_target=None):
         return True
 
 
-def start_agent_when_ready(timeout=25.0):
+def start_agent_when_ready(name=None, language=None, timeout=25.0):
     """Wait for the Bluetooth hands-free nodes (they usually appear when the
     phone's call audio opens the SCO link), then attach the agent."""
     deadline = time.time() + timeout
@@ -174,7 +178,7 @@ def start_agent_when_ready(timeout=25.0):
             "this laptop over Bluetooth HFP. Falling back to default audio.",
             flush=True,
         )
-    return start_agent(in_node, out_node)
+    return start_agent(in_node, out_node, name, language)
 
 
 def stop_agent():
@@ -376,7 +380,7 @@ def monitor_call_cycle(phone, name, duration_sec=0, native_dialed=False, script=
         flush=True,
     )
 
-    start_agent_when_ready()
+    start_agent_when_ready(name, language)
 
     try:
         while not call_stop_event.is_set():
