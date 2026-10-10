@@ -115,12 +115,15 @@ public class AutoDialerPlugin extends Plugin {
             stateStr = "IDLE";
             cancelAutoDisconnect();
             isOffhook = false;
-            hangupWatching = false;
+            // NOTE: do NOT stop the hangup watcher here. OEM radios can emit a
+            // transient IDLE when a call is answered / the SCO link opens, which
+            // would otherwise kill the watcher before the bridge asks to hang up.
         }
 
         // Report the state to the bridge directly from native code (the WebView
         // may be frozen in the background during the call).
         postState(stateStr);
+        postDiag("state_change", stateStr);
 
         JSObject ret = new JSObject();
         ret.put("state", stateStr);
@@ -137,6 +140,10 @@ public class AutoDialerPlugin extends Plugin {
     }
 
     private boolean performHangup() {
+        return performHangup(true);
+    }
+
+    private boolean performHangup(boolean bringFront) {
         boolean ended = false;
         boolean perm = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED;
         Log.i(TAG, "performHangup: answeredPerm=" + perm + " sdk=" + Build.VERSION.SDK_INT + " telecom=" + (telecomManager != null));
@@ -174,7 +181,7 @@ public class AutoDialerPlugin extends Plugin {
 
         // Immediately re-assert screen wakefulness and return focus to MainActivity
         try {
-            if (getActivity() != null) {
+            if (bringFront && getActivity() != null) {
                 getActivity().runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -209,6 +216,9 @@ public class AutoDialerPlugin extends Plugin {
             bridgeUrl = bUrl.trim().replaceAll("/+$", "");
             hangupUrl = bridgeUrl;
         }
+        // Start the background watcher now, before the call is even placed, so
+        // it is guaranteed to be listening when the bridge requests a hang-up.
+        startWatcher(bridgeUrl);
 
         if (phone == null || phone.trim().isEmpty()) {
             call.reject("Phone number is required");
@@ -280,7 +290,9 @@ public class AutoDialerPlugin extends Plugin {
             public void run() {
                 int attempts = 0;
                 boolean loggedError = false;
-                while (hangupWatching && attempts < 300) {
+                boolean sawActive = false;
+                boolean fronted = false;
+                while (hangupWatching && attempts < 1200) {
                     attempts++;
                     boolean done = false;
                     try {
@@ -297,17 +309,29 @@ public class AutoDialerPlugin extends Plugin {
                             boolean active = o.optBoolean("active", false);
                             boolean hangup = o.optBoolean("hangup_requested", false);
                             String state = o.optString("call_state", "");
-                            if (!active && ("COMPLETED".equals(state) || "IDLE".equals(state))) {
-                                done = true;
-                            } else if (hangup) {
+
+                            if (active || "CONNECTED".equals(state) || "DIALING".equals(state)) {
+                                sawActive = true;
+                            }
+
+                            if (hangup) {
+                                final boolean bringFront = !fronted;
+                                fronted = true;
                                 Log.i(TAG, "watcher: hangup_requested active=" + active + " state=" + state + " -> performHangup");
                                 postDiag("hangup_detected", "active=" + active + " state=" + state);
                                 timerHandler.post(new Runnable() {
                                     @Override
                                     public void run() {
-                                        performHangup();
+                                        performHangup(bringFront);
                                     }
                                 });
+                            }
+
+                            // Only conclude once we have actually seen the call live
+                            // AND the bridge now reports it finished. This prevents a
+                            // transient "IDLE" at answer time from stopping us early.
+                            if (sawActive && !active && ("COMPLETED".equals(state) || "IDLE".equals(state))) {
+                                done = true;
                             }
                         }
                     } catch (Throwable t) {
@@ -317,9 +341,13 @@ public class AutoDialerPlugin extends Plugin {
                             postDiag("watcher_poll_error", String.valueOf(t.getMessage()));
                         }
                     }
+                    if (!sawActive && attempts > 130) {
+                        // The call never came up (declined/unanswered) — stop.
+                        break;
+                    }
                     if (done) break;
                     try {
-                        Thread.sleep(800);
+                        Thread.sleep(700);
                     } catch (InterruptedException e) {
                         break;
                     }

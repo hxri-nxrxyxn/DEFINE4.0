@@ -468,15 +468,23 @@ def monitor_call_bt(phone, name, duration_sec=0, script="", language=""):
     saw_nodes = False
     offhook_since = None
     hangup_since = None
+    idle_since = None
     conn_start = None
     connect_deadline = time.time() + 90.0
 
     try:
         while not call_stop_event.is_set():
             time.sleep(0.4)
+            # The phone can emit a transient IDLE when a call is answered or the
+            # SCO link opens; only treat a *sustained* IDLE as the call ending.
             if app_call_state["idle"]:
-                print("[+] Call ended (app reported idle).", flush=True)
-                break
+                if idle_since is None:
+                    idle_since = time.time()
+                elif time.time() - idle_since > 4.0:
+                    print("[+] Call ended (app reported idle).", flush=True)
+                    break
+            else:
+                idle_since = None
 
             # When a hang-up is requested (agent ended / DTMF outcome / /end) we
             # wait for the app to end the call natively, instead of treating the
@@ -666,7 +674,7 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
         elif self.path == "/diag":
             # Native app diagnostics (no USB needed): log so the run can be
             # inspected from this laptop even while the phone is unplugged.
-            print(f"[diag] {data}", flush=True)
+            print(f"[diag {time.strftime('%H:%M:%S')}] {data}", flush=True)
             self._send_json({"ok": True})
 
         elif self.path == "/api/convai/configure":
