@@ -590,6 +590,7 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "call already in progress", "status": current_call_status}, 409)
                 return
 
+            current_call_status["hangup_requested"] = False
             t = threading.Thread(
                 target=monitor_call_cycle,
                 args=(phone, name, duration, native_dialed, script, language),

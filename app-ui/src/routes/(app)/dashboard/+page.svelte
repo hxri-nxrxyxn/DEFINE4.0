@@ -297,7 +297,7 @@
 
 			// No-USB: the bridge asks us to hang up (agent ended / DTMF outcome /
 			// /end); end the call with the phone's native dialer.
-			if (status.hangup_requested && isNative) {
+			if (status.hangup_requested && isNative && status.active) {
 				await endCallNatively();
 				return;
 			}
