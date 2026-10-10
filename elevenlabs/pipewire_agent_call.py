@@ -837,7 +837,12 @@ class PermanentCallSession:
             print(f"{YELLOW}[!] Could not reach bridge ({path}): {e}{RESET}")
 
     async def _send_initiation(self, ws: Any) -> None:
-        """Start the ElevenLabs session so the agent delivers its first message."""
+        """Start the ElevenLabs session and trigger the agent's opening.
+
+        The agent's `first_message` is intentionally empty so it can generate
+        the introduction + campaign message itself, translated into the
+        recipient's language. A short nudge makes it deliver that opening.
+        """
         if self._initiated:
             return
         self._initiated = True
@@ -850,6 +855,10 @@ class PermanentCallSession:
             await ws.send(json.dumps({
                 "type": "conversation_initiation_client_data",
                 "dynamic_variables": dyn,
+            }))
+            await ws.send(json.dumps({
+                "type": "user_message",
+                "text": "The call has connected. Please begin now.",
             }))
             print(f"\n  {GREEN}▶ [Session started]{RESET} — the bot will introduce itself now\n")
         except Exception:

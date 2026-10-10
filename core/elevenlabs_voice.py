@@ -79,6 +79,9 @@ LANG_CODES: Dict[str, str] = {
 # Languages the agent is allowed to switch between mid-conversation.
 SUPPORTED_LANGUAGES = ["en", "hi", "ta", "te", "ml", "mr", "kn", "bn"]
 
+# Reverse map: code -> human language name.
+LANG_NAMES = {code: name.capitalize() for name, code in LANG_CODES.items()}
+
 
 def _build_call_first_message(script: str, name: Optional[str] = None) -> str:
     base = (script or "").strip()
@@ -105,22 +108,19 @@ def _build_call_first_message(script: str, name: Optional[str] = None) -> str:
 
 def _build_call_prompt(script: str) -> str:
     script = (script or "").strip()
-    if script:
-        context = (
-            "Deliver this campaign message naturally in the recipient's own "
-            f'language: "{script}"'
-        )
-    else:
-        context = "Deliver your campaign message naturally in the recipient's own language."
+    message = script if script else "Deliver your campaign message."
 
     return "\n".join(
         [
             "You are a polite, natural outbound voice agent for DEFINE.",
-            "The recipient's name is {{name}}. Greet them warmly by name.",
-            context,
-            "Reply in the SAME language the recipient is currently speaking. If they switch language, switch with them immediately.",
+            "The recipient's name is {{name}} and their preferred language is {{language}}.",
+            "Speak ONLY in {{language}}, from your very first sentence.",
+            "When the call connects (or when you are asked to begin), greet the recipient by name, introduce yourself as 'DEFINE Voice AI', and deliver this campaign message in {{language}}, translated naturally:",
+            f'"{message}"',
+            "Then continue the whole conversation in {{language}}.",
+            "If the recipient switches language, follow them and keep speaking their language.",
             "Answer their questions and keep the conversation natural and brief.",
-            "If the script asks the recipient to press a key (1 to confirm, 2 to reschedule, 9 to opt out), the keypad is captured automatically — do not ask for it again, and never claim they confirmed.",
+            "If the message asks the recipient to press a key (1 to confirm, 2 to reschedule, 9 to opt out), the keypad is captured automatically — do not ask for it again, and never claim they confirmed.",
             "IMPORTANT: never assume or invent the recipient's decision. A greeting like 'hello' is NOT a confirmation. Only call report_outcome once the recipient has explicitly stated their choice (or a keypad digit was pressed):",
             "- confirmed: the recipient explicitly agreed, confirmed, or will attend.",
             "- reschedule: the recipient explicitly asked to reschedule or be called again later.",
@@ -197,18 +197,24 @@ def configure_call_agent(
     typed in the Template panel instead of a stale, previously-set message.
     """
     agent_id = agent_id or ELEVENLABS_AGENT_ID
-    first_message = _build_call_first_message(script, name)
     prompt_text = _build_call_prompt(script)
     lang_code = LANG_CODES.get((language or "").strip().lower(), "en")
+    lang_name = (language or "").strip() or LANG_NAMES.get(lang_code, "English")
 
+    # The agent generates its own opening (introducing itself and delivering the
+    # template translated) in the recipient's language, so we leave
+    # `first_message` empty and trigger the opening with a nudge at call start.
     payload = {
         "conversation_config": {
             "agent": {
-                "first_message": first_message,
+                "first_message": "",
                 "language": lang_code,
                 "disable_first_message_interruptions": True,
                 "dynamic_variables": {
-                    "dynamic_variable_placeholders": {"name": name or "there"}
+                    "dynamic_variable_placeholders": {
+                        "name": name or "there",
+                        "language": lang_name,
+                    }
                 },
                 "prompt": {
                     "prompt": prompt_text,
@@ -222,7 +228,7 @@ def configure_call_agent(
             # Register the switchable languages so the language_detection tool
             # can adapt when the caller changes language mid-conversation.
             "language_presets": {
-                code: {"overrides": {"agent": {"first_message": first_message}}}
+                code: {"overrides": {"agent": {"first_message": ""}}}
                 for code in SUPPORTED_LANGUAGES
                 if code != lang_code
             },
@@ -242,8 +248,8 @@ def configure_call_agent(
         with urllib.request.urlopen(req, timeout=10) as resp:
             ok = resp.status == 200
         print(
-            f"[ElevenLabs] Agent configured | first_message={first_message[:60]!r} "
-            f"| language={lang_code}",
+            f"[ElevenLabs] Agent configured | language={lang_code} ({lang_name}) "
+            f"| message={(script or '')[:70]!r}",
             flush=True,
         )
         return ok

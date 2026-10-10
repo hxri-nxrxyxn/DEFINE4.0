@@ -8,7 +8,7 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { campaign, type CallLogItem, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
-	import { subscribeAllCalls, seedDemo, clearCalls, type CallRecord } from '#lib/firebase.js';
+	import { subscribeCalls, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
 	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
 	import Download from '@lucide/svelte/icons/download';
@@ -40,21 +40,6 @@
 		opt_out: { label: 'Opted out', color: 'var(--chart-5)' },
 		no_response: { label: 'No response', color: 'var(--chart-2)' }
 	};
-
-	const SAMPLE_RECIPIENTS = [
-		{ name: 'Ananya Sharma', phone: '9821000210', language: 'Hindi', segment: 'Parent' },
-		{ name: 'Karthik Iyer', phone: '9945001845', language: 'Tamil', segment: 'Alumni' },
-		{ name: 'Meera Nair', phone: '9744004019', language: 'Malayalam', segment: 'Parent' },
-		{ name: 'Rohan Gupta', phone: '9611000733', language: 'Marathi', segment: 'Student' },
-		{ name: 'Sneha Reddy', phone: '9849002901', language: 'Telugu', segment: 'Parent' },
-		{ name: 'Arjun Das', phone: '9836001188', language: 'Bengali', segment: 'Alumni' },
-		{ name: 'Priya Menon', phone: '9739003344', language: 'Malayalam', segment: 'Staff' },
-		{ name: 'Vikram Singh', phone: '9811005522', language: 'Hindi', segment: 'Parent' },
-		{ name: 'Divya Rao', phone: '9900006677', language: 'Kannada', segment: 'Student' },
-		{ name: 'Naveen Kumar', phone: '9959008899', language: 'Tamil', segment: 'Parent' },
-		{ name: 'Fatima Sheikh', phone: '9845001234', language: 'Hindi', segment: 'Alumni' },
-		{ name: 'Ishaan Patel', phone: '9727004567', language: 'Marathi', segment: 'Staff' }
-	];
 
 	const liveTotal = $derived(liveCalls.length);
 	const liveConfirmed = $derived(liveCalls.filter((c) => c.disposition === 'confirmed').length);
@@ -120,22 +105,6 @@
 				pct: Math.round((e.confirmed / Math.max(1, e.total)) * 100)
 			}));
 	});
-
-	async function seedFirebase() {
-		const recs = campaign.recipients.length ? campaign.recipients : SAMPLE_RECIPIENTS;
-		await seedDemo(
-			campaign.campaignId,
-			recs.map((r) => ({
-				name: r.name,
-				phone: r.phone,
-				language: r.language || 'Hindi',
-				segment: r.segment || 'General'
-			})),
-			campaign.templateText || 'Hello {name}, this is a reminder about the upcoming event.',
-			campaign.csvName || 'DEFINE Demo Campaign'
-		);
-		toast.success('Seeded demo data to Firebase');
-	}
 
 	async function clearFirebase() {
 		await clearCalls(campaign.campaignId);
@@ -475,7 +444,7 @@
 		// Poll loop every 800ms
 		loopTimer = setInterval(runAutoDialerLoop, 800);
 		// Live data from Firebase RTDB (all campaigns)
-		unsubCalls = subscribeAllCalls((c) => {
+		unsubCalls = subscribeCalls(campaign.campaignId, (c) => {
 			liveCalls = c;
 		});
 	});
@@ -525,19 +494,14 @@
 	<!-- Live Firebase RTDB Analytics -->
 	<Card.Root class="border-primary/30 bg-primary/[0.03]">
 		<Card.Header>
-			<div class="flex items-center justify-between">
-				<div>
+			<div class="flex flex-wrap items-start justify-between gap-2">
+				<div class="min-w-0">
 					<Card.Title class="text-base">Live Campaign Analytics</Card.Title>
-					<Card.Description>Realtime from Firebase · {liveTotal} calls</Card.Description>
+					<Card.Description>Realtime · {liveTotal} calls</Card.Description>
 				</div>
-				<div class="flex items-center gap-1.5">
-					<Button variant="outline" size="sm" class="rounded-lg h-8 text-xs" onclick={seedFirebase}>
-						Seed demo
-					</Button>
-					<Button variant="ghost" size="sm" class="rounded-lg h-8 text-xs" onclick={clearFirebase}>
-						Clear
-					</Button>
-				</div>
+				<Button variant="ghost" size="sm" class="h-8 shrink-0 rounded-lg text-xs" onclick={clearFirebase}>
+					Clear
+				</Button>
 			</div>
 		</Card.Header>
 		<Card.Content class="space-y-4">
@@ -571,12 +535,12 @@
 								{#snippet tooltip()}<Chart.Tooltip />{/snippet}
 							</PieChart>
 						</Chart.Container>
-						<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+						<div class="mt-3 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
 							{#each liveDispData as d (d.key)}
-								<div class="flex items-center gap-2">
+								<div class="flex min-w-0 items-center gap-2">
 									<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {d.color}"></span>
-									<span class="truncate text-muted-foreground">{d.label}</span>
-									<span class="ml-auto tabular-nums">{d.value}</span>
+									<span class="min-w-0 flex-1 truncate text-muted-foreground">{d.label}</span>
+									<span class="shrink-0 font-medium tabular-nums">{d.value}</span>
 								</div>
 							{/each}
 						</div>
@@ -588,12 +552,12 @@
 								{#snippet tooltip()}<Chart.Tooltip />{/snippet}
 							</PieChart>
 						</Chart.Container>
-						<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+						<div class="mt-3 grid gap-x-4 gap-y-1.5 text-xs sm:grid-cols-2">
 							{#each liveLangData as d (d.key)}
-								<div class="flex items-center gap-2">
+								<div class="flex min-w-0 items-center gap-2">
 									<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {d.color}"></span>
-									<span class="truncate text-muted-foreground">{d.label}</span>
-									<span class="ml-auto tabular-nums">{d.value}</span>
+									<span class="min-w-0 flex-1 truncate text-muted-foreground">{d.label}</span>
+									<span class="shrink-0 font-medium tabular-nums">{d.value}</span>
 								</div>
 							{/each}
 						</div>
@@ -605,9 +569,9 @@
 					<div class="space-y-2">
 						{#each liveSegData as s (s.label)}
 							<div class="space-y-1">
-								<div class="flex items-center justify-between text-xs">
-									<span class="text-foreground">{s.label}</span>
-									<span class="tabular-nums text-muted-foreground">{s.value} · {s.pct}%</span>
+								<div class="flex min-w-0 items-center justify-between gap-2 text-xs">
+									<span class="min-w-0 truncate text-foreground">{s.label}</span>
+									<span class="shrink-0 tabular-nums text-muted-foreground">{s.value} · {s.pct}%</span>
 								</div>
 								<div class="h-2 w-full overflow-hidden rounded-full bg-muted">
 									<div class="h-full rounded-full bg-primary" style="width: {s.pct}%"></div>
@@ -622,9 +586,9 @@
 					<div class="space-y-2">
 						{#each liveCampaignData as cp (cp.label)}
 							<div class="space-y-1">
-								<div class="flex items-center justify-between text-xs">
-									<span class="truncate text-foreground">{cp.label}</span>
-									<span class="tabular-nums text-muted-foreground">
+								<div class="flex min-w-0 items-center justify-between gap-2 text-xs">
+									<span class="min-w-0 truncate text-foreground">{cp.label}</span>
+									<span class="shrink-0 tabular-nums text-muted-foreground">
 										{cp.value} calls · {cp.pct}% confirmed
 									</span>
 								</div>
@@ -675,7 +639,7 @@
 				</div>
 			{:else}
 				<div class="py-6 text-center text-xs text-muted-foreground">
-					No live calls yet. Tap “Seed demo” to populate Firebase, or place calls to see them stream here.
+					No calls yet. Place calls to see them stream here.
 				</div>
 			{/if}
 		</Card.Content>
@@ -817,12 +781,12 @@
 					{/snippet}
 				</PieChart>
 			</Chart.Container>
-			<div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs pt-1">
+			<div class="grid gap-x-4 gap-y-2 pt-1 text-xs sm:grid-cols-2">
 				{#each languageData as item (item.label)}
-					<div class="flex items-center gap-2">
+					<div class="flex min-w-0 items-center gap-2">
 						<span class="size-2.5 shrink-0 rounded-[2px]" style="background: {item.color}"></span>
-						<span class="text-muted-foreground">{item.label}</span>
-						<span class="ml-auto tabular-nums font-mono">{item.value}</span>
+						<span class="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span>
+						<span class="shrink-0 font-medium tabular-nums">{item.value}</span>
 					</div>
 				{/each}
 			</div>
