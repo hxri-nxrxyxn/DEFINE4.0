@@ -35,17 +35,32 @@ const SET_SCRIPT_TOOL = {
 	type: 'client',
 	name: 'set_script',
 	description:
-		'Save the finalized call script so the app can use it for the campaign. Call this every time you have composed or updated the script.',
+		'Save/update the current call-script draft so the operator can see it. Call this every time you compose or change the script.',
 	parameters: {
 		type: 'object',
 		properties: {
 			script: {
 				type: 'string',
-				description:
-					'The call script to read to recipients, keeping the {name} placeholder where their name goes.'
+				description: 'The current full script, keeping the {name} placeholder.'
 			}
 		},
 		required: ['script']
+	}
+};
+
+const CONFIRM_SCRIPT_TOOL = {
+	type: 'client',
+	name: 'confirm_script',
+	description:
+		"Call this once the operator confirms they are happy with the script (e.g. they say 'done', 'fine', 'ok', \"that's good\").",
+	parameters: {
+		type: 'object',
+		properties: {
+			script: {
+				type: 'string',
+				description: 'The final, approved script text.'
+			}
+		}
 	}
 };
 
@@ -86,14 +101,19 @@ function buildCallPrompt(script: string): string {
 }
 
 const BUILDER_FIRST_MESSAGE =
-	"Hi! What should the call say? For example, 'remind Class 8 parents about tomorrow's meeting'.";
+	"Hi {{name}}! I'm your RSVP script assistant. Tell me what the call is about and I'll draft the call script for you.";
 
 const BUILDER_PROMPT = [
-	'You are the DEFINE campaign assistant. The operator will describe, in natural speech and any language, what an outbound call should say or do.',
-	'Your only job is to turn their request into ONE short, friendly, spoken call script (1-3 sentences) that a voice agent reads to a recipient.',
-	'Keep the placeholder {name} exactly where the recipient name goes.',
-	'Do NOT role-play as a recipient, do NOT discuss the operator, and do NOT chat about unrelated things.',
-	'Whenever you have composed or updated the script, immediately call the set_script tool with the final script text, then reply with one short line like "Done — ready to place the call."'
+	'You are the DEFINE script assistant, talking with the campaign operator (the user of this app).',
+	'Your job is to help them design the voice-call script for an outbound RSVP campaign.',
+	'Compose the script in this standard RSVP format:',
+	'"Hello {name}, we are <enquiring about | inviting you to | informing you about> <the event>. <optionally: It will be held on <date> at <time> at <venue>.> Will you be available to attend? Press 1 to confirm, press 2 to reschedule, or press 9 to opt out."',
+	"Keep the placeholder {name} exactly where the recipient's name goes.",
+	'Whenever you compose or change the script, immediately call the set_script tool with the FULL new script. Do not read the whole script aloud every time — a short spoken confirmation is enough.',
+	'If the operator asks for a change, analyse the script you already produced, apply the requested change, and call set_script again with the updated full script.',
+	'Ask one short clarifying question only if a key detail is missing (the occasion, date/time, venue, or tone).',
+	'Do NOT role-play as a recipient and do NOT discuss unrelated things; you are only drafting the script with the operator.',
+	'When the operator confirms they are happy, call the confirm_script tool with the final script.'
 ].join('\n');
 
 export const POST: RequestHandler = async ({ request }) => {
@@ -109,11 +129,11 @@ export const POST: RequestHandler = async ({ request }) => {
 		mode === 'build'
 			? {
 					first_message: BUILDER_FIRST_MESSAGE,
-					language: langCode,
+					language: 'en',
 					dynamic_variables: { dynamic_variable_placeholders: { name } },
 					prompt: {
 						prompt: BUILDER_PROMPT,
-						tools: [SET_SCRIPT_TOOL]
+						tools: [SET_SCRIPT_TOOL, CONFIRM_SCRIPT_TOOL]
 					}
 				}
 			: {

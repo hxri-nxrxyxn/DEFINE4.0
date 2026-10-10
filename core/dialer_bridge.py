@@ -37,12 +37,13 @@ ELEVENLABS_AGENT_SCRIPT = os.path.join(ELEVENLABS_DIR, "pipewire_agent_call.py")
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 try:
-    from core.elevenlabs_voice import configure_call_agent
+    from core.elevenlabs_voice import configure_call_agent, configure_builder_agent
 except Exception:
     try:
-        from elevenlabs_voice import configure_call_agent
+        from elevenlabs_voice import configure_call_agent, configure_builder_agent
     except Exception:  # pragma: no cover
         configure_call_agent = None
+        configure_builder_agent = None
 
 current_call_status = {
     "active": False,
@@ -506,16 +507,21 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
             })
 
         elif self.path == "/api/convai/configure":
+            mode = (data.get("mode", "") or "").lower()
             script = data.get("script", "") or ""
             name = data.get("name", "there") or "there"
             language = data.get("language", "") or ""
             ok = False
-            if configure_call_agent is not None:
-                try:
-                    ok = configure_call_agent(script, name, language)
-                except Exception as e:
-                    print(f"[agent] Could not configure ElevenLabs agent: {e}", flush=True)
-            self._send_json({"ok": bool(ok), "configured": bool(ok)})
+            try:
+                if mode == "build":
+                    if configure_builder_agent is not None:
+                        ok = configure_builder_agent(name, script)
+                else:
+                    if configure_call_agent is not None:
+                        ok = configure_call_agent(script, name, language)
+            except Exception as e:
+                print(f"[agent] Could not configure ElevenLabs agent: {e}", flush=True)
+            self._send_json({"ok": bool(ok), "configured": bool(ok), "mode": mode or "call"})
         else:
             self._send_json({"error": "not found"}, 404)
 

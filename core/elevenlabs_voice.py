@@ -185,6 +185,62 @@ _LANGUAGE_DETECTION_TOOL = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Script-builder (assistant) mode — used by the Template "mic" flow
+# ---------------------------------------------------------------------------
+_SET_SCRIPT_TOOL = {
+    "type": "client",
+    "name": "set_script",
+    "description": (
+        "Save/update the current call-script draft so the operator can see it. "
+        "Call this every time you compose or change the script."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "script": {
+                "type": "string",
+                "description": "The current full script, keeping the {name} placeholder.",
+            }
+        },
+        "required": ["script"],
+    },
+}
+
+_CONFIRM_SCRIPT_TOOL = {
+    "type": "client",
+    "name": "confirm_script",
+    "description": (
+        "Call this once the operator confirms they are happy with the script "
+        "(e.g. they say 'done', 'fine', 'ok', \"that's good\")."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "script": {
+                "type": "string",
+                "description": "The final, approved script text.",
+            }
+        },
+    },
+}
+
+_BUILDER_PROMPT = "\n".join(
+    [
+        "You are the DEFINE script assistant, talking with the campaign operator (the user of this app).",
+        "Your job is to help them design the voice-call script for an outbound RSVP campaign.",
+        "Compose the script in this standard RSVP format:",
+        '"Hello {name}, we are <enquiring about | inviting you to | informing you about> <the event>. <optionally: It will be held on <date> at <time> at <venue>.> Will you be available to attend? Press 1 to confirm, press 2 to reschedule, or press 9 to opt out."',
+        "Keep the placeholder {name} exactly where the recipient's name goes.",
+        "Whenever you compose or change the script, immediately call the set_script tool with the FULL new script. Do not read the whole script aloud every time — a short spoken confirmation is enough.",
+        "If the operator asks for a change, analyse the script you already produced, apply the requested change, and call set_script again with the updated full script.",
+        "Ask one short clarifying question only if a key detail is missing (the occasion, date/time, venue, or tone).",
+        "Do NOT role-play as a recipient and do NOT discuss unrelated things; you are only drafting the script with the operator.",
+        "When the operator confirms they are happy, call the confirm_script tool with the final script.",
+    ]
+)
+
+
 def configure_call_agent(
     script: str,
     name: Optional[str] = None,
@@ -255,6 +311,56 @@ def configure_call_agent(
         return ok
     except Exception as e:
         print(f"[ElevenLabs ConvAI Agent Configure Error]: {e}", flush=True)
+        return False
+
+
+def configure_builder_agent(
+    operator_name: Optional[str] = None,
+    script: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> bool:
+    """
+    Configure the agent for the Template "mic" assistant flow: a friendly
+    script designer that drafts/edits the RSVP script with the operator.
+    """
+    agent_id = agent_id or ELEVENLABS_AGENT_ID
+    name = (operator_name or "there").strip() or "there"
+    first_message = (
+        f"Hi {name}! I'm your RSVP script assistant. Tell me what the call is "
+        "about and I'll draft the call script for you."
+    )
+
+    payload = {
+        "conversation_config": {
+            "agent": {
+                "first_message": first_message,
+                "language": "en",
+                "disable_first_message_interruptions": False,
+                "dynamic_variables": {"dynamic_variable_placeholders": {"name": name}},
+                "prompt": {
+                    "prompt": _BUILDER_PROMPT,
+                    "tools": [_SET_SCRIPT_TOOL, _CONFIRM_SCRIPT_TOOL],
+                },
+            }
+        }
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"https://api.elevenlabs.io/v1/convai/agents/{agent_id}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+            },
+            method="PATCH",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = resp.status == 200
+        print(f"[ElevenLabs] Builder agent configured | operator={name!r}", flush=True)
+        return ok
+    except Exception as e:
+        print(f"[ElevenLabs ConvAI Builder Configure Error]: {e}", flush=True)
         return False
 
 

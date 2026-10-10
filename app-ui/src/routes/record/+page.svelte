@@ -27,7 +27,10 @@
 	};
 
 	const contact = campaign.activeRecipient;
-	const contactName = contact?.name?.trim() || campaign.userName || 'there';
+	const contactName = contact?.name?.trim() || 'there';
+	const operatorName = campaign.userName || 'Hari';
+	// Build mode talks to the app's operator; call mode talks to the roster contact.
+	const agentName = callMode ? contactName : operatorName;
 	const contactLanguage = contact?.language || 'English';
 	const contactPhone = contact?.phone || '';
 
@@ -55,6 +58,7 @@
 	let level = $state(0);
 	let liveTranscript = $state('');
 	let agentResponseText = $state('');
+	let draftScript = $state('');
 	let outcome = $state<string | null>(null);
 	let convSession: ConvAISession | undefined;
 	let disposed = false;
@@ -84,8 +88,8 @@
 						body: JSON.stringify({
 							mode: callMode ? 'call' : 'build',
 							script: cleanScript(campaign.templateText),
-							name: contactName,
-							language: contactLanguage
+							name: agentName,
+							language: callMode ? contactLanguage : 'English'
 						}),
 						signal: AbortSignal.timeout(2000)
 					});
@@ -112,6 +116,7 @@
 						if (!disposed && status !== 'processing' && status !== 'done') status = 'listening';
 					},
 					onScript: (script) => handleScript(script),
+					onConfirmScript: (script) => handleConfirmScript(script),
 					onOutcome: (o) => handleOutcome(o),
 					onError: (err) => {
 						console.error('ElevenLabs ConvAI session error:', err);
@@ -122,7 +127,7 @@
 						if (callMode && !outcome && !userSpoke) finalize('no_response');
 					}
 				},
-				{ name: contactName, language: contactLanguage }
+				{ name: agentName, language: callMode ? contactLanguage : 'English' }
 			);
 			if (disposed) {
 				convSession.stop();
@@ -143,19 +148,35 @@
 		}
 	}
 
-	// Assistant mode: the agent handed us the composed script.
+	// Assistant mode: the agent handed us a draft — show it, keep iterating.
 	function handleScript(script: string) {
-		if (disposed) return;
+		if (disposed || callMode) return;
 		const s = stripTags(script);
 		if (!s) return;
+		draftScript = s;
+	}
+
+	// Assistant mode: the operator approved the script — commit it.
+	function handleConfirmScript(script: string) {
+		if (disposed || callMode) return;
+		commitTemplate(stripTags(script) || draftScript);
+	}
+
+	function commitTemplate(script: string) {
+		if (disposed) return;
+		const s = (script || '').trim();
+		if (!s) {
+			toast.error('No script yet', { description: 'Ask the assistant to draft one first.' });
+			return;
+		}
 		campaign.templateText = s;
 		status = 'done';
 		disposed = true;
 		try {
 			convSession?.stop();
 		} catch {}
-		toast.success('Script ready', { description: s });
-		setTimeout(() => go('/preview'), 700);
+		toast.success('Template ready', { description: 'You can still edit it here.' });
+		setTimeout(() => go('/template'), 700);
 	}
 
 	function handleOutcome(o: string) {
@@ -197,6 +218,8 @@
 		if (callMode) {
 			status = 'processing';
 			finalize(outcome ?? (userSpoke ? 'confirmed' : 'no_response'));
+		} else if (draftScript.trim()) {
+			commitTemplate(draftScript);
 		} else {
 			exit('/template');
 		}
@@ -246,7 +269,9 @@
 			{:else if status === 'listening'}
 				{callMode
 					? 'Speak naturally — the agent will wrap up the call automatically.'
-					: 'Describe the campaign, e.g. "remind my friends I\'m moving to America".'}
+					: draftScript
+						? 'Say "change the venue to …" to edit, or "done" (or tap Use this template) to keep it.'
+						: 'Tell the assistant the occasion, e.g. "design an RSVP script for our school PTA meeting".'}
 			{:else}
 				Please allow microphone access.
 			{/if}
@@ -284,19 +309,39 @@
 		</button>
 	</div>
 
-	<div class="mb-4 text-center">
+	{#if !callMode && draftScript}
+		<div class="mt-6 w-full max-w-md rounded-xl border border-border bg-muted/30 p-3 text-left">
+			<p class="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+				Draft script
+			</p>
+			<p class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{draftScript}</p>
+		</div>
+	{/if}
+
+	<div class="mt-6 mb-4 flex flex-wrap items-center justify-center gap-2">
 		{#if status === 'listening'}
-			<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={stop}>
-				{callMode ? 'End call' : 'Done'}
-			</Button>
+			{#if callMode}
+				<Button variant="outline" size="sm" class="rounded-xl px-4" onclick={stop}>
+					End call
+				</Button>
+			{:else}
+				{#if draftScript}
+					<Button size="sm" class="rounded-xl px-4" onclick={() => commitTemplate(draftScript)}>
+						Use this template
+					</Button>
+				{/if}
+				<Button variant="ghost" size="sm" class="rounded-xl px-4" onclick={cancel}>
+					Cancel
+				</Button>
+			{/if}
 		{:else if status === 'done'}
 			<Button
 				variant="outline"
 				size="sm"
 				class="rounded-xl px-4"
-				onclick={() => go(callMode ? '/dashboard' : '/preview')}
+				onclick={() => go(callMode ? '/dashboard' : '/template')}
 			>
-				{callMode ? 'View dashboard' : 'Preview'}
+				{callMode ? 'View dashboard' : 'Back to template'}
 			</Button>
 		{:else}
 			<Button variant="ghost" size="sm" class="rounded-xl px-4" onclick={cancel}>
