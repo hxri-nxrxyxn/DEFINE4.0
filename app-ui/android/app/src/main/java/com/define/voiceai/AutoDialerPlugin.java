@@ -87,8 +87,8 @@ public class AutoDialerPlugin extends Plugin {
             if (!isOffhook) {
                 isOffhook = true;
                 callPickupTimestamp = System.currentTimeMillis();
-                // Schedule native auto-disconnect
-                scheduleAutoDisconnect(targetDurationSeconds);
+                // No native auto-disconnect: the call now stays connected until
+                // the recipient hangs up or an external trigger calls endCall().
             }
         } else if (state == TelephonyManager.CALL_STATE_RINGING) {
             stateStr = "RINGING";
@@ -103,17 +103,6 @@ public class AutoDialerPlugin extends Plugin {
         ret.put("stateCode", state);
         ret.put("timestamp", System.currentTimeMillis());
         notifyListeners("callStateChange", ret);
-    }
-
-    private void scheduleAutoDisconnect(int seconds) {
-        cancelAutoDisconnect();
-        autoHangupRunnable = new Runnable() {
-            @Override
-            public void run() {
-                performHangup();
-            }
-        };
-        timerHandler.postDelayed(autoHangupRunnable, seconds * 1000L);
     }
 
     private void cancelAutoDisconnect() {

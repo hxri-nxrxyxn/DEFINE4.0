@@ -32,18 +32,26 @@ let activeBridgeUrl = isNative ? 'http://localhost:8765' : '';
 /**
  * Triggers a call to the specified phone number.
  * Uses native Android AutoDialer plugin if running inside Capacitor,
- * and notifies the dialer bridge daemon to manage the active call timer & hangup.
+ * and notifies the dialer bridge daemon to manage the active call.
+ * The call stays connected until the recipient hangs up or /end is triggered.
  */
-export async function triggerCall(phone: string, name = 'Recipient', duration = 10): Promise<boolean> {
+export async function triggerCall(
+	phone: string,
+	name = 'Recipient',
+	script?: string,
+	language?: string
+): Promise<boolean> {
 	// First inform the bridge daemon (both localhost and LAN endpoints)
-	// We pass native_dialed=true when on native so the bridge doesn't trigger a duplicate ACTION_CALL
+	// We pass native_dialed=true when on native so the bridge doesn't trigger a duplicate ACTION_CALL.
+	// `script`/`language` let the bridge point the ElevenLabs agent at the
+	// operator's Template before the call connects.
 	for (const base of (isNative ? BRIDGE_ENDPOINTS : [''])) {
 		try {
 			const endpoint = base ? `${base}/call` : apiUrl('/api/calls/bridge');
 			const res = await fetch(endpoint, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ phone, name, duration, native_dialed: isNative }),
+				body: JSON.stringify({ phone, name, script, language, native_dialed: isNative }),
 				signal: AbortSignal.timeout(2000)
 			});
 			if (res.ok) {
@@ -58,7 +66,7 @@ export async function triggerCall(phone: string, name = 'Recipient', duration = 
 	// In native Capacitor environment, trigger the native ACTION_CALL intent
 	if (isNative) {
 		try {
-			await AutoDialer.makeCall({ phone, duration });
+			await AutoDialer.makeCall({ phone });
 			return true;
 		} catch (e) {
 			console.error('AutoDialer plugin makeCall failed:', e);
@@ -105,7 +113,7 @@ export async function pollCallStatus(): Promise<{
 	active: boolean;
 	call_state: 'IDLE' | 'DIALING' | 'CONNECTED' | 'DISCONNECTING' | 'COMPLETED';
 	elapsed_seconds: number;
-	outcome?: 'completed' | 'declined' | 'unanswered' | 'error' | null;
+	outcome?: string | null;
 	current_phone?: string;
 	current_name?: string;
 }> {

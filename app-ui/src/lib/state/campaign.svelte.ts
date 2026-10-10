@@ -18,6 +18,7 @@ export type OutcomeDisposition =
 	| 'confirmed'
 	| 'declined'
 	| 'not_available'
+	| 'reschedule'
 	| 'opt_out'
 	| 'no_response';
 
@@ -81,7 +82,6 @@ class CampaignStore {
 	currentCallName = $state('');
 	currentCallStatus = $state<'idle' | 'dialing' | 'connected' | 'completed' | 'stopped'>('idle');
 	currentCallDurationSec = $state(0);
-	targetCallDurationSec = $state(10);
 	callLogs = $state<CallLogItem[]>([]);
 
 	/** Per-recipient call outcomes, keyed by phone number. */
@@ -101,7 +101,7 @@ class CampaignStore {
 	nonResponders = $derived(
 		this.recipients.filter((r) => {
 			const d = this.outcomes[r.phone]?.disposition;
-			return d === 'no_response' || d === 'not_available' || d === 'declined';
+			return d === 'no_response' || d === 'not_available' || d === 'reschedule' || d === 'declined';
 		})
 	);
 
@@ -109,7 +109,7 @@ class CampaignStore {
 	retryList = $derived(
 		this.recipients.filter((r) => {
 			const d = this.outcomes[r.phone]?.disposition;
-			return d === 'no_response' || d === 'not_available' || d === 'declined';
+			return d === 'no_response' || d === 'not_available' || d === 'reschedule' || d === 'declined';
 		})
 	);
 
@@ -118,6 +118,7 @@ class CampaignStore {
 			confirmed: 0,
 			declined: 0,
 			not_available: 0,
+			reschedule: 0,
 			opt_out: 0,
 			no_response: 0,
 			pending: 0

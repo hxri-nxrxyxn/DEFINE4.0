@@ -41,7 +41,8 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 			body: JSON.stringify({
 				phone: body.phone,
 				name: body.name,
-				duration: body.duration ?? 10
+				script: body.script,
+				language: body.language
 			}),
 			signal: AbortSignal.timeout(3000)
 		});
@@ -56,7 +57,6 @@ export const POST: RequestHandler = async ({ request, fetch }) => {
 	return json({
 		status: 'started',
 		phone: body.phone,
-		name: body.name,
-		target_duration: body.duration ?? 10
+		name: body.name
 	});
 };

@@ -20,6 +20,7 @@
 	const OUTCOME_LABEL: Record<string, string> = {
 		confirmed: 'Confirmed',
 		not_available: 'Not available — moved to retry list',
+		reschedule: 'Rescheduled — moved to retry list',
 		declined: 'Declined',
 		opt_out: 'Opted out',
 		no_response: 'No response — moved to retry list'

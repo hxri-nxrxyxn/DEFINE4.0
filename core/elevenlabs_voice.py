@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import uuid
 import urllib.request
@@ -58,6 +59,167 @@ def update_conversational_agent(prompt_text: str, agent_id: str = ELEVENLABS_AGE
             return resp.status == 200
     except Exception as e:
         print(f"[ElevenLabs ConvAI Agent Update Error]: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Per-call agent configuration (template -> agent prompt)
+# ---------------------------------------------------------------------------
+LANG_CODES: Dict[str, str] = {
+    "english": "en",
+    "hindi": "hi",
+    "tamil": "ta",
+    "telugu": "te",
+    "malayalam": "ml",
+    "marathi": "mr",
+    "kannada": "kn",
+    "bengali": "bn",
+}
+
+
+def _build_call_first_message(script: str, name: Optional[str] = None) -> str:
+    base = (script or "").strip()
+    if base:
+        # Keep a {{name}} placeholder if the script still has one, otherwise the
+        # caller has already rendered the recipient's name into the script.
+        base = re.sub(r"\{\s*name\s*\}", "{{name}}", base, flags=re.IGNORECASE)
+        return base
+    if name:
+        return (
+            f"Hello {name}, this is DEFINE Voice AI calling with an important "
+            "update. Do you have a moment?"
+        )
+    return (
+        "Hello, this is DEFINE Voice AI calling with an important update. "
+        "Do you have a moment?"
+    )
+
+
+def _build_call_prompt(script: str) -> str:
+    script = (script or "").strip()
+    if script:
+        context = (
+            "Deliver this campaign message naturally in the recipient's own "
+            f'language: "{script}"'
+        )
+    else:
+        context = "Deliver your campaign message naturally in the recipient's own language."
+
+    return "\n".join(
+        [
+            "You are a polite, natural outbound voice agent for DEFINE.",
+            "The recipient's name is {{name}}. Greet them warmly by name.",
+            context,
+            "Answer their questions and keep the conversation natural and brief.",
+            "If the script asks the recipient to press a key (1 to confirm, 2 to reschedule, 9 to opt out), that is handled automatically — you do not need to ask for it again.",
+            "As soon as the outcome is clear, call the report_outcome tool exactly once:",
+            "- confirmed: the recipient agreed, confirmed, or will attend.",
+            "- reschedule: the recipient wants to reschedule or be called again later.",
+            "- not_available: the recipient is busy or cannot talk right now.",
+            "- declined: the recipient says no or is not interested.",
+            "- opt_out: the recipient asks to stop being called.",
+            "After reporting the outcome, say one short closing line, then call the end_conversation tool to hang up.",
+        ]
+    )
+
+
+_REPORT_OUTCOME_TOOL = {
+    "type": "client",
+    "name": "report_outcome",
+    "description": (
+        "Report the final outcome of the outbound call exactly once, as soon as "
+        "the outcome is clear."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "outcome": {
+                "type": "string",
+                "description": "The final outcome of the call.",
+                "enum": [
+                    "confirmed",
+                    "declined",
+                    "reschedule",
+                    "not_available",
+                    "opt_out",
+                ],
+            }
+        },
+        "required": ["outcome"],
+    },
+}
+
+_END_CALL_TOOL = {
+    "type": "client",
+    "name": "end_conversation",
+    "description": (
+        "Hang up the phone call once the conversation has definitely ended "
+        "(after your short closing line)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Optional short reason for ending the call.",
+            }
+        },
+    },
+}
+
+
+def configure_call_agent(
+    script: str,
+    name: Optional[str] = None,
+    language: Optional[str] = None,
+    agent_id: Optional[str] = None,
+) -> bool:
+    """
+    Points the ElevenLabs Conversational AI agent at the operator's campaign
+    template. Called per outbound call so the agent always speaks the script
+    typed in the Template panel instead of a stale, previously-set message.
+    """
+    agent_id = agent_id or ELEVENLABS_AGENT_ID
+    first_message = _build_call_first_message(script, name)
+    prompt_text = _build_call_prompt(script)
+    lang_code = LANG_CODES.get((language or "").strip().lower(), "en")
+
+    payload = {
+        "conversation_config": {
+            "agent": {
+                "first_message": first_message,
+                "language": lang_code,
+                "dynamic_variables": {
+                    "dynamic_variable_placeholders": {"name": name or "there"}
+                },
+                "prompt": {
+                    "prompt": prompt_text,
+                    "tools": [_REPORT_OUTCOME_TOOL, _END_CALL_TOOL],
+                },
+            }
+        }
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"https://api.elevenlabs.io/v1/convai/agents/{agent_id}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "xi-api-key": ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+            },
+            method="PATCH",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ok = resp.status == 200
+        print(
+            f"[ElevenLabs] Agent configured | first_message={first_message[:60]!r} "
+            f"| language={lang_code}",
+            flush=True,
+        )
+        return ok
+    except Exception as e:
+        print(f"[ElevenLabs ConvAI Agent Configure Error]: {e}", flush=True)
         return False
 
 

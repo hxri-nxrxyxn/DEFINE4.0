@@ -7,7 +7,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
-	import { campaign, type CallLogItem } from '#lib/state/campaign.svelte.js';
+	import { campaign, type CallLogItem, type OutcomeDisposition } from '#lib/state/campaign.svelte.js';
 	import { subscribeAllCalls, seedDemo, clearCalls, type CallRecord } from '#lib/firebase.js';
 	import { apiUrl } from '#lib/config.js';
 	import { triggerCall, terminateCall, pollCallStatus } from '#lib/audio/auto-dialer.js';
@@ -220,9 +220,10 @@
 	);
 
 	const OUTCOME_META: Record<string, { label: string; class: string }> = {
-		confirmed: { label: 'Confirmed (10s)', class: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+		confirmed: { label: 'Confirmed', class: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
 		declined: { label: 'Declined', class: 'bg-rose-500/15 text-rose-600 dark:text-rose-400' },
 		not_available: { label: 'Not available', class: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
+		reschedule: { label: 'Rescheduled', class: 'bg-sky-500/15 text-sky-600 dark:text-sky-400' },
 		opt_out: { label: 'Opted out', class: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400' },
 		no_response: { label: 'Non-responder', class: 'bg-muted text-muted-foreground' }
 	};
@@ -310,7 +311,7 @@
 			});
 
 			try {
-				await triggerCall(current.phone, current.name, 10);
+				await triggerCall(current.phone, current.name, formattedScript, current.language);
 			} catch (err) {
 				console.error('Trigger call failed:', err);
 			} finally {
@@ -356,12 +357,18 @@
 
 			if (isConcluded) {
 				isExecutingStep = true;
-				const outcome = status.outcome || (campaign.currentCallDurationSec >= 9.5 ? 'completed' : 'declined');
+				const outcome = status.outcome || (callRegisteredActive ? 'completed' : 'declined');
 				const finalDuration = Math.max(campaign.currentCallDurationSec, status.elapsed_seconds || 0);
 
-				let disposition: 'confirmed' | 'declined' | 'no_response' = 'no_response';
-				if (outcome === 'completed') {
+				let disposition: OutcomeDisposition = 'no_response';
+				if (outcome === 'confirmed' || outcome === 'completed') {
 					disposition = 'confirmed';
+				} else if (outcome === 'reschedule') {
+					disposition = 'reschedule';
+				} else if (outcome === 'not_available' || outcome === 'unanswered') {
+					disposition = 'not_available';
+				} else if (outcome === 'opt_out') {
+					disposition = 'opt_out';
 				} else if (outcome === 'declined') {
 					disposition = 'declined';
 				} else {
@@ -379,7 +386,15 @@
 
 				if (outcome === 'completed') {
 					toast.success(`Completed call with ${current.name}`, {
-						description: `10s active duration met. Advancing to next contact...`
+						description: `Call ended. Advancing to next contact...`
+					});
+				} else if (outcome === 'reschedule') {
+					toast.info(`Rescheduled: ${current.name}`, {
+						description: `Recipient asked to reschedule. Added to retry list.`
+					});
+				} else if (outcome === 'opt_out') {
+					toast.info(`Opted out: ${current.name}`, {
+						description: `Recipient asked to stop being called.`
 					});
 				} else if (outcome === 'declined') {
 					toast.info(`Call declined: ${current.name}`, {
@@ -684,7 +699,7 @@
 						<div>
 							<Card.Title class="text-sm sm:text-base font-semibold">IVR Dialer</Card.Title>
 							<Card.Description class="text-xs">
-								{campaign.isCampaignRunning ? 'Auto-dialing · 10s per call' : 'Idle'}
+								{campaign.isCampaignRunning ? 'Auto-dialing' : 'Idle'}
 							</Card.Description>
 						</div>
 					</div>
@@ -745,7 +760,7 @@
 						<div class="text-muted-foreground text-[11px]">Pickup Timer</div>
 						<div class="font-semibold text-primary mt-0.5 text-xs tabular-nums">
 							{#if campaign.currentCallStatus === 'connected'}
-								{campaign.currentCallDurationSec.toFixed(1)}s / 10s
+								{campaign.currentCallDurationSec.toFixed(1)}s
 							{:else if campaign.currentCallStatus === 'dialing'}
 								Dialing...
 							{:else}

@@ -187,7 +187,7 @@
 				</div>
 			</div>
 			<span class="inline-flex items-center rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground">
-				10s auto-hangup
+				Agent on call
 			</span>
 		</div>
 	{/if}

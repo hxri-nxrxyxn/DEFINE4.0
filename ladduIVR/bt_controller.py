@@ -15,8 +15,13 @@ from pathlib import Path
 WIREPLUMBER_CONF_DIR = Path.home() / ".config" / "wireplumber" / "wireplumber.conf.d"
 ROLES_CONF_PATH = WIREPLUMBER_CONF_DIR / "51-bluetooth-roles.conf"
 
+# Hands-Free mode: the laptop must advertise itself as a HEADSET (A2DP sink +
+# HSP/HFP HF) so the paired phone connects as the Audio Gateway and routes its
+# call audio to the laptop. Advertising the AG/source roles too made BlueZ pick
+# the wrong direction (laptop as gateway) and no bluez_input/bluez_output nodes
+# were created for the ElevenLabs agent to bind to.
 HANDSFREE_CONFIG = """monitor.bluez.properties = {
-  bluez5.roles = [ a2dp_sink a2dp_source bap_sink bap_source hsp_hs hsp_ag hfp_hf hfp_ag ]
+  bluez5.roles = [ a2dp_sink hsp_hs hfp_hf ]
   bluez5.hfphsp-backend = "native"
 }
 """

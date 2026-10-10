@@ -310,6 +310,86 @@ class AudioVADProcessor:
 
 
 # ---------------------------------------------------------
+# DTMF Keypad Detection (recipient pressing 1 / 2 / 9)
+# ---------------------------------------------------------
+class DTMFDetector:
+    """
+    Decodes DTMF keypad tones from 16-bit mono PCM frames (16 kHz).
+
+    The recipient's keypad presses arrive as tones inside the call audio
+    (phone -> Bluetooth HFP -> PipeWire), so we detect the standard DTMF
+    low/high frequency pairs rather than relying on any telephony API.
+    """
+
+    _LOW = [697.0, 770.0, 852.0, 941.0]
+    _HIGH = [1209.0, 1336.0, 1477.0, 1633.0]
+    _KEYS = [
+        ["1", "2", "3", "A"],
+        ["4", "5", "6", "B"],
+        ["7", "8", "9", "C"],
+        ["*", "0", "#", "D"],
+    ]
+
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        frame_duration_ms: int = 30,
+        min_frames: int = 2,
+        dominance: float = 0.5,
+        min_rms: float = 120.0,
+    ):
+        self.sample_rate = sample_rate
+        self.frame_bytes = int(sample_rate * (frame_duration_ms / 1000.0) * 2)
+        n = max(1, self.frame_bytes // 2)
+        t = np.arange(n) / float(sample_rate)
+        window = np.hanning(n)
+        freqs = self._LOW + self._HIGH
+        # Precompute windowed DFT basis vectors for the 8 DTMF frequencies.
+        self._basis = [np.exp(-2j * np.pi * f * t) * window for f in freqs]
+        self._min_frames = max(1, min_frames)
+        self._dominance = dominance
+        self._min_rms = min_rms
+        self._last: Optional[str] = None
+        self._count = 0
+        self._emitted: Optional[str] = None
+
+    def _reset(self) -> None:
+        self._last = None
+        self._count = 0
+        self._emitted = None
+
+    def process(self, raw_bytes: bytes) -> Optional[str]:
+        if len(raw_bytes) < self.frame_bytes:
+            return None
+        samples = np.frombuffer(raw_bytes[: self.frame_bytes], dtype="<i2").astype(np.float64)
+        rms = float(np.sqrt(np.mean(samples ** 2)))
+        if rms < self._min_rms:
+            self._reset()
+            return None
+
+        powers = np.array([abs(np.dot(samples, b)) ** 2 for b in self._basis])
+        total = float(powers.sum()) + 1e-9
+        low_p, high_p = powers[:4], powers[4:]
+        li = int(np.argmax(low_p))
+        hi = int(np.argmax(high_p))
+        if (float(low_p[li]) + float(high_p[hi])) / total < self._dominance:
+            self._reset()
+            return None
+
+        digit = self._KEYS[li][hi]
+        if digit == self._last:
+            self._count += 1
+        else:
+            self._last = digit
+            self._count = 1
+            self._emitted = None
+        if self._count >= self._min_frames and self._emitted != digit:
+            self._emitted = digit
+            return digit
+        return None
+
+
+# ---------------------------------------------------------
 # Audio Playback Worker (PipeWire pw-play)
 # ---------------------------------------------------------
 class AudioPlaybackWorker:
@@ -455,6 +535,7 @@ class PermanentCallSession:
         rms_threshold: float = 200.0,
         hangover_ms: int = 650,
         isolate_links: bool = True,
+        bridge_url: str = "http://127.0.0.1:8765",
     ):
         self.api_key = api_key
         self.agent_id = agent_id
@@ -465,6 +546,7 @@ class PermanentCallSession:
         self.rms_threshold = rms_threshold
         self.hangover_ms = hangover_ms
         self.isolate_links = isolate_links
+        self.bridge_url = bridge_url
 
         self.link_manager = BluetoothLinkManager(input_target, output_target)
         self.player = AudioPlaybackWorker(output_target, sample_rate=16000)
@@ -475,12 +557,19 @@ class PermanentCallSession:
             rms_threshold=rms_threshold,
             hangover_ms=hangover_ms,
         )
+        self.dtmf = DTMFDetector(sample_rate=16000)
 
         self.record_proc: Optional[subprocess.Popen] = None
         self.running: bool = True
         self.call_start_time: float = time.time()
         self.last_status_time: float = 0.0
         self._cleaned_up: bool = False
+
+        # Outcome tracking (keypad or agent tool call).
+        self.outcome: Optional[str] = None
+        self.outcome_reported: bool = False
+        self.end_signalled: bool = False
+        self._fallback_task: Optional[asyncio.Task] = None
 
     def print_banner(self):
         print(f"\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════════════════════╗{RESET}")
@@ -605,6 +694,11 @@ class PermanentCallSession:
             except Exception:
                 break
 
+            # Keypad capture (recipient pressing 1/2/9 on their phone).
+            digit = self.dtmf.process(raw_chunk)
+            if digit and not self.outcome_reported:
+                await self._handle_dtmf(ws, digit)
+
             is_speech, rms, event, frames_to_send = self.vad_processor.process_frame(raw_chunk)
 
             # Terminal VU Meter update (throttled ~10 times per second)
@@ -676,6 +770,25 @@ class PermanentCallSession:
                     # Server confirmed interruption event
                     self.player.stop_playback_immediately()
 
+                elif etype == "client_tool_call":
+                    tool = event.get("client_tool_call", {}) or {}
+                    tool_name = tool.get("tool_name")
+                    tool_call_id = tool.get("tool_call_id")
+                    params = tool.get("parameters", {}) or {}
+                    if tool_name == "report_outcome":
+                        await self._record_outcome(params.get("outcome"))
+                    elif tool_name == "end_conversation":
+                        await self._end_call_from_agent()
+                    try:
+                        await ws.send(json.dumps({
+                            "type": "client_tool_result",
+                            "tool_call_id": tool_call_id,
+                            "result": "ok",
+                            "is_error": False,
+                        }))
+                    except Exception:
+                        pass
+
                 elif etype == "ping":
                     event_id = event.get("ping_event", {}).get("event_id")
                     pong = {"type": "pong", "event_id": event_id}
@@ -689,6 +802,74 @@ class PermanentCallSession:
                 if self.running:
                     print(f"\n{YELLOW}[!] Event parsing error: {e}{RESET}")
                 break
+
+    def _post_to_bridge(self, path: str, payload: dict) -> None:
+        try:
+            requests.post(f"{self.bridge_url}{path}", json=payload, timeout=3)
+        except Exception as e:
+            print(f"{YELLOW}[!] Could not reach bridge ({path}): {e}{RESET}")
+
+    async def _record_outcome(self, outcome: Optional[str]) -> None:
+        """Record the outcome with the bridge (does NOT hang up the call)."""
+        if not outcome or self.outcome_reported:
+            return
+        self.outcome = outcome
+        self.outcome_reported = True
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self._post_to_bridge, "/agent/outcome",
+            {"outcome": outcome, "end": False},
+        )
+        print(f"\n  {GREEN}📇 [Outcome]{RESET} {outcome}")
+
+    async def _handle_dtmf(self, ws: Any, digit: str) -> None:
+        """Recipient pressed a keypad digit (1 = confirm, 2 = reschedule, 9 = opt out)."""
+        mapping = {"1": "confirmed", "2": "reschedule", "9": "opt_out"}
+        outcome = mapping.get(digit)
+        if not outcome:
+            return
+        print(f"\n  {CYAN}☎️  [Keypad] {digit} -> {outcome}{RESET}")
+        await self._record_outcome(outcome)
+        # Let the agent acknowledge the keypad choice before we hang up.
+        try:
+            await ws.send(json.dumps({
+                "type": "user_message",
+                "text": (
+                    f"The recipient pressed {digit} on the keypad ({outcome}). "
+                    "Acknowledge it briefly, then wrap up the call."
+                ),
+            }))
+        except Exception:
+            pass
+        self._schedule_fallback_end()
+
+    def _schedule_fallback_end(self, delay: float = 6.0) -> None:
+        """Guarantee we disconnect from our side even if the agent never calls end_call."""
+        if self._fallback_task and not self._fallback_task.done():
+            return
+
+        async def _later():
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            if not self.end_signalled:
+                print(f"\n  {YELLOW}⏱️  [Fallback] Ending call after acknowledgement window.{RESET}")
+                await self._end_call_from_agent()
+
+        self._fallback_task = asyncio.create_task(_later())
+
+    async def _end_call_from_agent(self) -> None:
+        """Tell the bridge to hang up the phone call from our side."""
+        if self.end_signalled:
+            return
+        self.end_signalled = True
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self._post_to_bridge, "/agent/outcome",
+            {"outcome": self.outcome or "", "end": True},
+        )
+        self.running = False
 
     async def cleanup(self):
         if self._cleaned_up:
@@ -731,6 +912,7 @@ class WirePlumberExportWatcher:
         hangover_ms: int = 650,
         isolate_links: bool = True,
         check_interval_sec: float = 0.8,
+        bridge_url: str = "http://127.0.0.1:8765",
     ):
         self.api_key = api_key
         self.agent_id = agent_id
@@ -739,6 +921,7 @@ class WirePlumberExportWatcher:
         self.hangover_ms = hangover_ms
         self.isolate_links = isolate_links
         self.check_interval_sec = check_interval_sec
+        self.bridge_url = bridge_url
         self.running = True
         self.active_session: Optional[PermanentCallSession] = None
 
@@ -770,6 +953,7 @@ class WirePlumberExportWatcher:
                     rms_threshold=self.rms_threshold,
                     hangover_ms=self.hangover_ms,
                     isolate_links=self.isolate_links,
+                    bridge_url=self.bridge_url,
                 )
                 self.active_session = session
 
@@ -811,6 +995,7 @@ def main():
     parser.add_argument("--hangover-ms", type=int, default=650, help="Silence hangover time before ending speech turn (default 650ms)")
     parser.add_argument("--no-isolate", action="store_true", help="Do not isolate Bluetooth from laptop ALSA mic/speakers")
     parser.add_argument("--default-audio", action="store_true", help="Use default PipeWire audio instead of Bluetooth nodes")
+    parser.add_argument("--bridge-url", default="http://127.0.0.1:8765", help="Dialer bridge URL for outcome reporting (default: http://127.0.0.1:8765)")
     args = parser.parse_args()
 
     api_key, agent_id = load_credentials()
@@ -848,6 +1033,7 @@ def main():
             rms_threshold=args.rms_threshold,
             hangover_ms=args.hangover_ms,
             isolate_links=not args.no_isolate,
+            bridge_url=args.bridge_url,
         )
 
         def sig_handler(sig, frame):
@@ -875,6 +1061,7 @@ def main():
             rms_threshold=args.rms_threshold,
             hangover_ms=args.hangover_ms,
             isolate_links=not args.no_isolate,
+            bridge_url=args.bridge_url,
         )
 
         def sig_handler(sig, frame):

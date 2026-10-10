@@ -24,7 +24,7 @@ const OUTCOME_TOOL = {
 			outcome: {
 				type: 'string',
 				description: 'The final outcome of the call.',
-				enum: ['confirmed', 'declined', 'not_available', 'opt_out']
+				enum: ['confirmed', 'declined', 'reschedule', 'not_available', 'opt_out']
 			}
 		},
 		required: ['outcome']
@@ -77,6 +77,7 @@ function buildCallPrompt(script: string): string {
 		'Answer their questions and keep the conversation natural and brief.',
 		'As soon as the outcome is clear, call the report_outcome tool exactly once:',
 		'- confirmed: the recipient agreed, confirmed, or will attend.',
+		'- reschedule: the recipient wants to reschedule or be called again later.',
 		'- not_available: the recipient is busy or cannot talk now. Report this immediately (do not interrogate); offer to call back later.',
 		'- declined: the recipient says no, is not interested, or will not attend.',
 		'- opt_out: the recipient asks to stop being called.',

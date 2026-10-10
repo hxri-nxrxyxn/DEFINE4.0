@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.orchestrator import platform
 from core.analytics import analytics_engine
 from core.data_governance import consent_audit_ledger, erasure_audit_ledger, execute_right_to_erasure
-from core.elevenlabs_voice import synthesize_prompt_audio, get_exoml_response, update_conversational_agent
+from core.elevenlabs_voice import synthesize_prompt_audio, get_exoml_response, update_conversational_agent, configure_call_agent
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -476,8 +476,9 @@ class PlatformRequestHandler(SimpleHTTPRequestHandler):
 
             call_id = f"call_{uuid.uuid4().hex[:12]}"
 
-            # 1. Dynamically update ElevenLabs Conversational AI Agent config (first_message & prompt)
-            agent_updated = update_conversational_agent(template)
+            # 1. Point the ElevenLabs agent at this campaign's template (shared
+            #    helper so every call path personalizes the same way).
+            agent_updated = configure_call_agent(template, name)
 
             # 2. Synthesize text prompt into ElevenLabs TTS MP3 audio
             audio_path = synthesize_prompt_audio(template, call_id=call_id)
