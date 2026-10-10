@@ -65,6 +65,10 @@ app_call_state = {"offhook": False, "idle": False}
 # Event set by /end (the future auto-disconnect trigger) to stop the call loop.
 call_stop_event = None
 
+# Monotonic id of the current call. Timers created for a previous call must not
+# affect a newer one (a stale auto-end timer used to hang up the *next* call).
+call_generation = 0
+
 # ElevenLabs agent child process, guarded by a lock.
 _agent_process = None
 _agent_lock = threading.Lock()
@@ -606,11 +610,17 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": "phone required"}, 400)
                 return
 
+            # Always clear any stale hang-up flag from a previous call, even if
+            # we end up rejecting this one.
+            current_call_status["hangup_requested"] = False
+
             if current_call_status["active"]:
                 self._send_json({"error": "call already in progress", "status": current_call_status}, 409)
                 return
 
-            current_call_status["hangup_requested"] = False
+            global call_generation
+            call_generation += 1
+
             t = threading.Thread(
                 target=monitor_call_cycle,
                 args=(phone, name, duration, native_dialed, script, language),
@@ -652,9 +662,11 @@ class BridgeServer(http.server.BaseHTTPRequestHandler):
                     # The agent reported the outcome but hasn't explicitly ended
                     # the conversation yet — give it room to say its goodbye and
                     # call end_conversation; only force the hang-up if it never
-                    # does (kept longer than the agent's own fallback window).
-                    def _auto_end():
-                        if current_call_status.get("active"):
+                    # does. Guarded by the call generation so a timer left over
+                    # from a previous call can never hang up the next one.
+                    gen = call_generation
+                    def _auto_end(gen=gen):
+                        if gen == call_generation and current_call_status.get("active"):
                             current_call_status["hangup_requested"] = True
                     threading.Timer(45.0, _auto_end).start()
             if end_now:

@@ -277,31 +277,41 @@
 		// 1. If currently idle, place call
 		if (campaign.currentCallStatus === 'idle') {
 			isExecutingStep = true;
-			campaign.currentCallStatus = 'dialing';
-			campaign.currentCallDurationSec = 0;
-			lastDialTimestamp = Date.now();
-			callRegisteredActive = false;
-			hangupSent = false;
-
-			const formattedScript = formatScriptForRecipient(campaign.templateText, current.name);
-
-			const logItem: CallLogItem = {
-				phone: current.phone,
-				name: current.name,
-				language: current.language || 'Hindi',
-				status: 'dialing',
-				durationSeconds: 0,
-				callScriptText: formattedScript,
-				timestamp: Date.now()
-			};
-			campaign.callLogs = [logItem, ...campaign.callLogs];
-
-			toast.info(`Calling ${current.name}`, {
-				description: `Dialing ${current.phone}...`
-			});
-
 			try {
-				await triggerCall(current.phone, current.name, formattedScript, current.language);
+				// Never start a new call while the bridge still reports the
+				// previous one as active — doing so dropped calls instantly.
+				const pre = await pollCallStatus();
+				if (pre.active) {
+					return;
+				}
+
+				const formattedScript = formatScriptForRecipient(campaign.templateText, current.name);
+				const started = await triggerCall(current.phone, current.name, formattedScript, current.language);
+				if (!started) {
+					// Bridge busy / unreachable: stay idle and retry on the next tick.
+					return;
+				}
+
+				campaign.currentCallStatus = 'dialing';
+				campaign.currentCallDurationSec = 0;
+				lastDialTimestamp = Date.now();
+				callRegisteredActive = false;
+				hangupSent = false;
+
+				const logItem: CallLogItem = {
+					phone: current.phone,
+					name: current.name,
+					language: current.language || 'Hindi',
+					status: 'dialing',
+					durationSeconds: 0,
+					callScriptText: formattedScript,
+					timestamp: Date.now()
+				};
+				campaign.callLogs = [logItem, ...campaign.callLogs];
+
+				toast.info(`Calling ${current.name}`, {
+					description: `Dialing ${current.phone}...`
+				});
 			} catch (err) {
 				console.error('Trigger call failed:', err);
 			} finally {
@@ -349,8 +359,7 @@
 			const callStateStr = status.call_state as string;
 			const isConcluded =
 				callStateStr === 'COMPLETED' ||
-				(callRegisteredActive && !status.active && callStateStr !== 'CONNECTED') ||
-				(campaign.currentCallStatus === 'dialing' && !status.active && timeSinceDial > 6.0);
+				(callRegisteredActive && !status.active && callStateStr !== 'CONNECTED');
 
 			if (isConcluded) {
 				isExecutingStep = true;

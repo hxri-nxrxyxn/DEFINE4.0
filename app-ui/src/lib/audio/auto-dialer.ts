@@ -142,10 +142,10 @@ export async function triggerCall(
 	script?: string,
 	language?: string
 ): Promise<boolean> {
-	// First inform the bridge daemon (both localhost and LAN endpoints)
-	// We pass native_dialed=true when on native so the bridge doesn't trigger a duplicate ACTION_CALL.
-	// `script`/`language` let the bridge point the ElevenLabs agent at the
-	// operator's Template before the call connects.
+	// First inform the bridge daemon. It refuses (HTTP 409) while a previous
+	// call is still winding down — in that case we must NOT dial, otherwise the
+	// overlapping monitor / stale hang-up flag drops the new call instantly.
+	let accepted = !isNative;
 	for (const base of (isNative ? BRIDGE_ENDPOINTS : [''])) {
 		try {
 			const endpoint = base ? `${base}/call` : apiUrl('/api/calls/bridge');
@@ -153,11 +153,15 @@ export async function triggerCall(
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ phone, name, script, language, native_dialed: isNative }),
-				signal: AbortSignal.timeout(2000)
+				signal: AbortSignal.timeout(2500)
 			});
 			if (res.ok) {
 				activeBridgeUrl = base;
+				accepted = true;
 				break;
+			}
+			if (res.status === 409) {
+				break; // bridge is busy; don't try other endpoints
 			}
 		} catch {
 			// next
@@ -166,6 +170,10 @@ export async function triggerCall(
 
 	// In native Capacitor environment, trigger the native ACTION_CALL intent
 	if (isNative) {
+		if (!accepted) {
+			console.warn('[auto-dialer] bridge did not accept the call yet; not dialing');
+			return false;
+		}
 		await registerCallStateForwarding();
 		try {
 			await AutoDialer.makeCall({ phone, bridgeUrl: activeBridgeUrl });
@@ -173,10 +181,11 @@ export async function triggerCall(
 			return true;
 		} catch (e) {
 			console.error('AutoDialer plugin makeCall failed:', e);
+			return false;
 		}
 	}
 
-	return true;
+	return accepted;
 }
 
 /**
