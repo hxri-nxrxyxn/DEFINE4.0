@@ -1,6 +1,6 @@
 import { browser } from '$app/env';
 import type { Recipient } from '#lib/csv.js';
-import { publishCall, publishCampaign, newCampaignId } from '#lib/firebase.js';
+import { publishCall, publishCampaign, newCampaignId, type CallRecord } from '#lib/firebase.js';
 
 const STORAGE_KEY = 'campaign-draft';
 
@@ -221,7 +221,7 @@ class CampaignStore {
 		};
 
 		const r = this.recipients.find((x) => x.phone === phone);
-		void publishCall(this.campaignId, {
+		const record: CallRecord = {
 			name: r?.name ?? 'Recipient',
 			phone: phone.replace(/^\+91\s*/, ''),
 			language: r?.language ?? 'English',
@@ -230,9 +230,15 @@ class CampaignStore {
 			attempts: this.outcomes[phone].attempts,
 			durationSec: 0,
 			ts: Date.now(),
-			transcript,
 			campaign: this.csvName || 'Campaign'
-		});
+		};
+		// Firebase RTDB rejects `undefined` values: passing `transcript: undefined`
+		// (as the dashboard does) made every `set()` throw, silently dropping the
+		// call record. Only include the field when we actually have one.
+		if (transcript && transcript.trim()) {
+			record.transcript = transcript;
+		}
+		void publishCall(this.campaignId, record);
 	}
 
 	reset() {

@@ -76,8 +76,17 @@ export async function publishCampaign(
 export async function publishCall(cid: string, call: CallRecord): Promise<void> {
 	const database = getDb();
 	if (!database) return;
-	const node = push(ref(database, `${path(cid)}/calls`));
-	await set(node, call);
+	try {
+		// Drop any undefined fields: the RTDB SDK throws on undefined values.
+		const clean: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(call)) {
+			if (v !== undefined) clean[k] = v;
+		}
+		const node = push(ref(database, `${path(cid)}/calls`));
+		await set(node, clean);
+	} catch (e) {
+		console.error('[firebase] publishCall failed:', e);
+	}
 }
 
 export function subscribeCalls(cid: string, cb: (calls: CallRecord[]) => void): () => void {	const database = getDb();
